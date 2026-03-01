@@ -267,7 +267,7 @@ async function sendNotification(username, info) {
 
   chrome.notifications.create(notifId, {
     type: 'basic',
-    iconUrl: info.thumbnail || 'icons/icon128.png',
+    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
     title: `🟢 ${username} が配信開始！${autoJoin ? ' (自動入場)' : ''}`,
     message,
     contextMessage: info.viewers > 0 ? `${info.viewers.toLocaleString()} 人が視聴中` : '',
@@ -385,7 +385,7 @@ function askContentScript(tabId) {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, { type: 'GET_FOLLOWED' }, (response) => {
       if (chrome.runtime.lastError) {
-        console.log('content.js not ready:', chrome.runtime.lastError.message);
+        // content.js 未注入は正常なフォールバック（executeScript で再試行）
         resolve([]);
       } else {
         resolve(response?.usernames || []);
