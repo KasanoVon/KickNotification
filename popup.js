@@ -7,9 +7,13 @@ const checkNowBtn = document.getElementById('checkNowBtn');
 const streamerList = document.getElementById('streamerList');
 const emptyState = document.getElementById('emptyState');
 const errorMsg = document.getElementById('errorMsg');
+const autoJoinToggle = document.getElementById('autoJoinToggle');
 
 // 初期化
-document.addEventListener('DOMContentLoaded', loadStreamers);
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadStreamers();
+  await loadSettings();
+});
 
 // ストリーマー追加
 addBtn.addEventListener('click', addStreamer);
@@ -19,6 +23,12 @@ usernameInput.addEventListener('keydown', (e) => {
 
 // フォロー中を同期ボタン
 syncFollowsBtn.addEventListener('click', syncFollowedChannels);
+
+// 自動入場トグル
+autoJoinToggle.addEventListener('click', async () => {
+  const isActive = autoJoinToggle.classList.toggle('active');
+  await chrome.storage.local.set({ autoJoin: isActive });
+});
 
 // 今すぐ確認ボタン
 checkNowBtn.addEventListener('click', () => {
@@ -110,6 +120,11 @@ async function removeStreamer(username) {
   delete liveStatus[username];
   await chrome.storage.local.set({ streamers: updated, liveStatus });
   await loadStreamers();
+}
+
+async function loadSettings() {
+  const { autoJoin = false } = await chrome.storage.local.get('autoJoin');
+  autoJoinToggle.classList.toggle('active', autoJoin);
 }
 
 async function loadStreamers() {

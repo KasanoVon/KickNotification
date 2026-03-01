@@ -25,7 +25,20 @@
         <button id="addBtn" class="btn btn-primary">追加</button>
       </div>
       <button id="syncFollowsBtn" class="btn btn-sync">フォロー中を同期</button>
+      <p class="sync-note">※ 同期には kick.com を開いている必要があります。同期後は不要です。</p>
       <p id="errorMsg" class="error-msg hidden"></p>
+    </section>
+
+    <section class="settings-section">
+      <label class="setting-row" id="autoJoinRow">
+        <div class="setting-info">
+          <span class="setting-name">自動入場</span>
+          <span class="setting-desc">配信開始時に自動でタブを開く</span>
+        </div>
+        <div class="toggle" id="autoJoinToggle">
+          <div class="toggle-thumb"></div>
+        </div>
+      </label>
     </section>
 
     <section class="streamers-section">

@@ -77,7 +77,14 @@ async function fetchChannelData(username) {
   return response.json();
 }
 
-function sendNotification(username, info) {
+async function sendNotification(username, info) {
+  const { autoJoin = false } = await chrome.storage.local.get('autoJoin');
+
+  // 自動入場が有効なら配信ページを自動で開く
+  if (autoJoin) {
+    chrome.tabs.create({ url: `https://kick.com/${username}`, active: true });
+  }
+
   const notifId = `kick-live-${username}-${Date.now()}`;
   const message = info.title
     ? `${info.title}${info.category ? ` [${info.category}]` : ''}`
@@ -86,7 +93,7 @@ function sendNotification(username, info) {
   chrome.notifications.create(notifId, {
     type: 'basic',
     iconUrl: info.thumbnail || 'icons/icon128.png',
-    title: `🟢 ${username} が配信開始！`,
+    title: `🟢 ${username} が配信開始！${autoJoin ? ' (自動入場)' : ''}`,
     message,
     contextMessage: info.viewers > 0 ? `${info.viewers.toLocaleString()} 人が視聴中` : '',
     priority: 2,
