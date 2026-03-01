@@ -7,12 +7,18 @@
     "notifications",
     "storage",
     "alarms",
-    "cookies",
     "tabs",
     "scripting"
   ],
   "host_permissions": [
     "https://kick.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://kick.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
   ],
   "background": {
     "service_worker": "background.js"
