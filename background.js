@@ -3,6 +3,179 @@
 
 const CHECK_INTERVAL_MINUTES = 1;
 const KICK_API_BASE = 'https://kick.com/api/v2/channels/';
+const KICK_OAUTH_BASE = 'https://id.kick.com';
+const KICK_PUBLIC_API = 'https://api.kick.com/public/v1';
+
+// ============================================================
+// OAuth 2.1 + PKCE ヘルパー
+// ============================================================
+
+function generateCodeVerifier() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+async function generateCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+// Kick OAuth ログイン（PKCE S256）
+// clientSecret は Kick がパブリッククライアントを未サポートの場合のみ必要
+async function kickOAuthLogin(clientId, clientSecret) {
+  const redirectUri = chrome.identity.getRedirectURL('kick');
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+  const state = generateCodeVerifier();
+
+  const authUrl = new URL(`${KICK_OAUTH_BASE}/oauth/authorize`);
+  authUrl.searchParams.set('client_id', clientId);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('scope', 'user:read channel:read');
+  authUrl.searchParams.set('state', state);
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
+
+  const responseUrl = await new Promise((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow(
+      { url: authUrl.toString(), interactive: true },
+      (url) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else if (!url) reject(new Error('認証がキャンセルされました'));
+        else resolve(url);
+      }
+    );
+  });
+
+  const returnedParams = new URL(responseUrl).searchParams;
+  if (returnedParams.get('state') !== state) throw new Error('State mismatch（セキュリティエラー）');
+  const code = returnedParams.get('code');
+  if (!code) throw new Error('認証コードが取得できませんでした');
+
+  // トークン交換
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    client_id: clientId,
+    code,
+    redirect_uri: redirectUri,
+    code_verifier: codeVerifier,
+  });
+  if (clientSecret) body.set('client_secret', clientSecret);
+
+  const tokenRes = await fetch(`${KICK_OAUTH_BASE}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+
+  if (!tokenRes.ok) {
+    const err = await tokenRes.text();
+    throw new Error(`トークン取得失敗 (${tokenRes.status}): ${err}`);
+  }
+
+  const tokens = await tokenRes.json();
+
+  // ユーザー情報を取得
+  const userInfo = await fetchWithToken(tokens.access_token, `${KICK_PUBLIC_API}/users`);
+  const user = userInfo?.data?.[0] || userInfo?.data || userInfo?.user || null;
+
+  await chrome.storage.local.set({
+    kickAccessToken: tokens.access_token,
+    kickRefreshToken: tokens.refresh_token || null,
+    kickTokenExpiry: Date.now() + (tokens.expires_in || 3600) * 1000,
+    kickClientId: clientId,
+    kickClientSecret: clientSecret || null,
+    kickUser: user,
+  });
+
+  return { success: true, user };
+}
+
+// トークンの有効期限チェック & リフレッシュ
+async function getValidToken() {
+  const data = await chrome.storage.local.get([
+    'kickAccessToken', 'kickRefreshToken', 'kickTokenExpiry',
+    'kickClientId', 'kickClientSecret',
+  ]);
+
+  if (!data.kickAccessToken) return null;
+
+  // 有効期限まで5分以上あればそのまま使用
+  if (data.kickTokenExpiry && Date.now() < data.kickTokenExpiry - 5 * 60 * 1000) {
+    return data.kickAccessToken;
+  }
+
+  // リフレッシュトークンで更新
+  if (!data.kickRefreshToken || !data.kickClientId) return null;
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: data.kickClientId,
+      refresh_token: data.kickRefreshToken,
+    });
+    if (data.kickClientSecret) body.set('client_secret', data.kickClientSecret);
+
+    const res = await fetch(`${KICK_OAUTH_BASE}/oauth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+    if (!res.ok) {
+      await chrome.storage.local.remove(['kickAccessToken', 'kickRefreshToken', 'kickTokenExpiry', 'kickUser']);
+      return null;
+    }
+
+    const tokens = await res.json();
+    await chrome.storage.local.set({
+      kickAccessToken: tokens.access_token,
+      kickRefreshToken: tokens.refresh_token || data.kickRefreshToken,
+      kickTokenExpiry: Date.now() + (tokens.expires_in || 3600) * 1000,
+    });
+    return tokens.access_token;
+  } catch {
+    return null;
+  }
+}
+
+// Bearer トークン付きで API リクエスト
+async function fetchWithToken(token, url) {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// フォロー中チャンネルを公式 API から取得
+async function getFollowedViaOAuth() {
+  const token = await getValidToken();
+  if (!token) return null;
+
+  // 試みるエンドポイント（公式APIにまだ公開されていない可能性あり）
+  const candidates = [
+    `${KICK_PUBLIC_API}/channels/followed`,
+    `${KICK_PUBLIC_API}/users/me/following`,
+    `${KICK_PUBLIC_API}/users/following`,
+  ];
+
+  for (const url of candidates) {
+    const data = await fetchWithToken(token, url);
+    if (!data) continue;
+    const list = data.data || data.channels || data.followed || (Array.isArray(data) ? data : null);
+    if (Array.isArray(list) && list.length > 0) {
+      return list.map((ch) => (ch.slug || ch.broadcaster_username || ch.username || '').toLowerCase()).filter(Boolean);
+    }
+  }
+
+  return null; // 公式APIでは未公開の可能性
+}
 
 // 拡張機能インストール時・起動時の初期化
 chrome.runtime.onInstalled.addListener(() => {
@@ -120,18 +293,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     syncFollowedChannels().then(sendResponse);
     return true;
   }
+  if (message.type === 'KICK_LOGIN') {
+    kickOAuthLogin(message.clientId, message.clientSecret).then(sendResponse).catch((err) =>
+      sendResponse({ error: err.message })
+    );
+    return true;
+  }
+  if (message.type === 'KICK_LOGOUT') {
+    chrome.storage.local.remove([
+      'kickAccessToken', 'kickRefreshToken', 'kickTokenExpiry',
+      'kickClientId', 'kickClientSecret', 'kickUser',
+    ]).then(() => sendResponse({ success: true }));
+    return true;
+  }
 });
 
 // フォロー中チャンネルを同期する
+// アプローチ0: 公式 OAuth API（kick.com タブ不要）
 // アプローチ1: content.js (DOM scraping) に依頼
 // アプローチ2: executeScript で直接 DOM を読む（content.js 未ロード時のフォールバック）
 async function syncFollowedChannels() {
   try {
+    // アプローチ0: OAuth トークンがあれば公式 API を試す
+    const oauthResult = await getFollowedViaOAuth();
+    if (oauthResult !== null) {
+      if (oauthResult.length > 0) return await mergeAndSave(oauthResult);
+      // トークンはあるが結果が空 = エンドポイント未公開の可能性 → DOM フォールバック
+    }
+
     const tabs = await chrome.tabs.query({ url: 'https://kick.com/*' });
     if (tabs.length === 0) {
+      const hasToken = !!(await getValidToken());
       return {
-        error:
-          'kick.com をタブで開いてログインした状態で再試行してください',
+        error: hasToken
+          ? '公式APIではフォロー一覧が未公開のため、kick.com をタブで開いてから再試行してください'
+          : 'kick.com をタブで開いてログインした状態で再試行してください（またはKick連携でログインしてください）',
       };
     }
 

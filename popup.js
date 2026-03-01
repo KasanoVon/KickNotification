@@ -9,10 +9,20 @@ const emptyState = document.getElementById('emptyState');
 const errorMsg = document.getElementById('errorMsg');
 const autoJoinToggle = document.getElementById('autoJoinToggle');
 
+// OAuth UI
+const loginForm = document.getElementById('loginForm');
+const loginStatus = document.getElementById('loginStatus');
+const clientIdInput = document.getElementById('clientIdInput');
+const clientSecretInput = document.getElementById('clientSecretInput');
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const authAvatar = document.getElementById('authAvatar');
+const authUsername = document.getElementById('authUsername');
+const loginError = document.getElementById('loginError');
+
 // 初期化
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadStreamers();
-  await loadSettings();
+  await Promise.all([loadStreamers(), loadSettings(), loadAuthStatus()]);
 });
 
 // ストリーマー追加
@@ -28,6 +38,42 @@ syncFollowsBtn.addEventListener('click', syncFollowedChannels);
 autoJoinToggle.addEventListener('click', async () => {
   const isActive = autoJoinToggle.classList.toggle('active');
   await chrome.storage.local.set({ autoJoin: isActive });
+});
+
+// Kick ログイン
+loginBtn.addEventListener('click', async () => {
+  const clientId = clientIdInput.value.trim();
+  const clientSecret = clientSecretInput.value.trim();
+  if (!clientId) {
+    showLoginError('Client ID を入力してください');
+    return;
+  }
+
+  loginBtn.disabled = true;
+  loginBtn.textContent = '認証中...';
+  hideLoginError();
+
+  chrome.runtime.sendMessage(
+    { type: 'KICK_LOGIN', clientId, clientSecret: clientSecret || null },
+    async (result) => {
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Kickにログイン';
+      if (result?.error) {
+        showLoginError(result.error);
+      } else {
+        clientIdInput.value = '';
+        clientSecretInput.value = '';
+        await loadAuthStatus();
+      }
+    }
+  );
+});
+
+// ログアウト
+logoutBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'KICK_LOGOUT' }, async () => {
+    await loadAuthStatus();
+  });
 });
 
 // 今すぐ確認ボタン
@@ -125,6 +171,32 @@ async function removeStreamer(username) {
 async function loadSettings() {
   const { autoJoin = false } = await chrome.storage.local.get('autoJoin');
   autoJoinToggle.classList.toggle('active', autoJoin);
+}
+
+async function loadAuthStatus() {
+  const { kickUser, kickAccessToken } = await chrome.storage.local.get(['kickUser', 'kickAccessToken']);
+
+  if (kickAccessToken && kickUser) {
+    // ログイン済み表示
+    loginForm.classList.add('hidden');
+    loginStatus.classList.remove('hidden');
+    authUsername.textContent = kickUser.username || kickUser.name || kickUser.slug || '—';
+    if (kickUser.profile_pic || kickUser.avatar) {
+      authAvatar.src = kickUser.profile_pic || kickUser.avatar;
+    }
+  } else {
+    loginForm.classList.remove('hidden');
+    loginStatus.classList.add('hidden');
+  }
+}
+
+function showLoginError(msg) {
+  loginError.textContent = msg;
+  loginError.classList.remove('hidden');
+}
+
+function hideLoginError() {
+  loginError.classList.add('hidden');
 }
 
 async function loadStreamers() {

@@ -273,6 +273,102 @@ input[type='text']::placeholder {
   font-weight: 600;
 }
 
+/* Kick 連携セクション */
+.auth-section {
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #adadb8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.auth-desc {
+  font-size: 11px;
+  color: #6e6e7a;
+  line-height: 1.4;
+}
+
+.auth-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.btn-kick {
+  background: #53fc18;
+  color: #0e0e10;
+  width: 100%;
+  font-weight: 700;
+}
+
+.btn-kick:hover:not(:disabled) {
+  background: #6fff2e;
+}
+
+.auth-hint {
+  font-size: 10px;
+  color: #6e6e7a;
+  line-height: 1.4;
+}
+
+.auth-hint a {
+  color: #53fc18;
+  text-decoration: none;
+}
+
+.auth-hint a:hover {
+  text-decoration: underline;
+}
+
+/* ログイン済み表示 */
+.auth-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auth-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #2a2a2d;
+  flex-shrink: 0;
+}
+
+.auth-user-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.auth-username {
+  font-size: 13px;
+  font-weight: 700;
+  color: #efeff1;
+}
+
+.auth-connected {
+  font-size: 11px;
+  color: #53fc18;
+}
+
 /* 同期に関する注記 */
 .sync-note {
   font-size: 10px;

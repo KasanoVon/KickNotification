@@ -8,7 +8,8 @@
     "storage",
     "alarms",
     "tabs",
-    "scripting"
+    "scripting",
+    "identity"
   ],
   "host_permissions": [
     "https://kick.com/*"

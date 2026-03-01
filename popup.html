@@ -29,6 +29,40 @@
       <p id="errorMsg" class="error-msg hidden"></p>
     </section>
 
+    <!-- Kick 連携（OAuth ログイン） -->
+    <section class="auth-section" id="authSection">
+      <!-- ログイン前: 入力フォーム -->
+      <div id="loginForm">
+        <div class="auth-header">
+          <span class="auth-title">Kick 連携</span>
+          <span class="auth-desc">ログインすると kick.com を開かずにフォロー同期できます</span>
+        </div>
+        <div class="auth-inputs" id="authInputs">
+          <input type="text" id="clientIdInput" placeholder="Client ID" autocomplete="off" spellcheck="false" />
+          <input type="password" id="clientSecretInput" placeholder="Client Secret（任意）" autocomplete="off" />
+        </div>
+        <button id="loginBtn" class="btn btn-kick">Kickにログイン</button>
+        <p class="auth-hint">
+          <a href="https://kick.com/developer/applications" target="_blank">kick.com/developer/applications</a>
+          でアプリを作成してください
+        </p>
+      </div>
+
+      <!-- ログイン後: ユーザー情報 -->
+      <div id="loginStatus" class="hidden">
+        <div class="auth-user">
+          <img id="authAvatar" class="auth-avatar" src="icons/icon48.png" alt="" />
+          <div class="auth-user-info">
+            <span class="auth-username" id="authUsername">—</span>
+            <span class="auth-connected">✓ Kick連携済み</span>
+          </div>
+          <button id="logoutBtn" class="btn btn-secondary btn-sm">解除</button>
+        </div>
+      </div>
+
+      <p id="loginError" class="error-msg hidden"></p>
+    </section>
+
     <section class="settings-section">
       <label class="setting-row" id="autoJoinRow">
         <div class="setting-info">
