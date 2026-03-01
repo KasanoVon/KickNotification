@@ -1,12 +1,13 @@
 // Kick Stream Notifier - Popup Script
 
-const usernameInput = document.getElementById('usernameInput');
-const addBtn = document.getElementById('addBtn');
 const syncFollowsBtn = document.getElementById('syncFollowsBtn');
 const checkNowBtn = document.getElementById('checkNowBtn');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
 const streamerList = document.getElementById('streamerList');
 const emptyState = document.getElementById('emptyState');
 const errorMsg = document.getElementById('errorMsg');
+const liveCount = document.getElementById('liveCount');
 
 // OAuth UI
 const loginForm = document.getElementById('loginForm');
@@ -24,14 +25,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([loadStreamers(), loadAuthStatus()]);
 });
 
-// ストリーマー追加
-addBtn.addEventListener('click', addStreamer);
-usernameInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') addStreamer();
+// 設定パネルの開閉
+settingsBtn.addEventListener('click', () => {
+  settingsPanel.classList.toggle('hidden');
+  settingsBtn.classList.toggle('active', !settingsPanel.classList.contains('hidden'));
 });
 
 // フォロー中を同期ボタン
 syncFollowsBtn.addEventListener('click', syncFollowedChannels);
+
+// 今すぐ更新ボタン
+checkNowBtn.addEventListener('click', () => {
+  checkNowBtn.disabled = true;
+  chrome.runtime.sendMessage({ type: 'CHECK_NOW' }, () => {
+    setTimeout(async () => {
+      await loadStreamers();
+      checkNowBtn.disabled = false;
+    }, 1500);
+  });
+});
 
 // Kick ログイン
 loginBtn.addEventListener('click', async () => {
@@ -50,7 +62,7 @@ loginBtn.addEventListener('click', async () => {
     { type: 'KICK_LOGIN', clientId, clientSecret: clientSecret || null },
     async (result) => {
       loginBtn.disabled = false;
-      loginBtn.textContent = 'Kickにログイン';
+      loginBtn.textContent = 'Kick にログイン';
       if (result?.error) {
         showLoginError(result.error);
       } else {
@@ -69,24 +81,11 @@ logoutBtn.addEventListener('click', () => {
   });
 });
 
-// 今すぐ確認ボタン
-checkNowBtn.addEventListener('click', () => {
-  checkNowBtn.disabled = true;
-  checkNowBtn.textContent = '確認中...';
-  chrome.runtime.sendMessage({ type: 'CHECK_NOW' }, () => {
-    setTimeout(() => {
-      loadStreamers();
-      checkNowBtn.disabled = false;
-      checkNowBtn.textContent = '今すぐ確認';
-    }, 1500);
-  });
-});
-
 // フォロー中チャンネルを取得して一括登録
-// fetch は CORS バイパスのため background.js (Service Worker) に委譲する
 function syncFollowedChannels() {
+  const origContent = syncFollowsBtn.innerHTML;
   syncFollowsBtn.disabled = true;
-  syncFollowsBtn.textContent = '取得中...';
+  syncFollowsBtn.querySelector('span').textContent = '取得中...';
   hideError();
 
   chrome.runtime.sendMessage({ type: 'SYNC_FOLLOWS' }, async (result) => {
@@ -94,70 +93,29 @@ function syncFollowedChannels() {
 
     if (!result || result.error) {
       showError(result?.error || '不明なエラーが発生しました');
-      syncFollowsBtn.textContent = 'フォロー中を同期';
+      syncFollowsBtn.querySelector('span').textContent = '同期';
       return;
     }
 
     await loadStreamers();
-    syncFollowsBtn.textContent = `${result.added}件追加しました`;
+    syncFollowsBtn.querySelector('span').textContent = `${result.added}件追加`;
     setTimeout(() => {
-      syncFollowsBtn.textContent = 'フォロー中を同期';
+      syncFollowsBtn.querySelector('span').textContent = '同期';
     }, 2500);
   });
 }
 
-async function addStreamer() {
-  const username = usernameInput.value.trim().toLowerCase();
-  if (!username) return;
-
-  if (!/^[a-z0-9_]{1,50}$/.test(username)) {
-    showError('ユーザー名は英数字とアンダースコアのみ使用できます');
-    return;
-  }
-
-  const { streamers = [] } = await chrome.storage.local.get('streamers');
-  if (streamers.includes(username)) {
-    showError('このストリーマーはすでに登録されています');
-    return;
-  }
-
-  addBtn.disabled = true;
-  addBtn.textContent = '確認中...';
-  hideError();
-
-  try {
-    // チャンネルの存在確認
-    const res = await fetch(`https://kick.com/api/v2/channels/${username}`, {
-      headers: { Accept: 'application/json' },
-    });
-
-    if (!res.ok) {
-      showError(res.status === 404 ? 'ユーザーが見つかりません' : 'APIエラーが発生しました');
-      return;
-    }
-
-    streamers.push(username);
-    await chrome.storage.local.set({ streamers });
-    usernameInput.value = '';
-    await loadStreamers();
-    // 追加直後にライブ状態を取得
-    chrome.runtime.sendMessage({ type: 'CHECK_NOW' });
-  } catch {
-    showError('ネットワークエラーが発生しました');
-  } finally {
-    addBtn.disabled = false;
-    addBtn.textContent = '追加';
-  }
-}
-
 async function removeStreamer(username) {
-  const { streamers = [], liveStatus = {} } = await chrome.storage.local.get([
-    'streamers',
-    'liveStatus',
-  ]);
+  const { streamers = [], liveStatus = {}, autoJoinStreamers = [] } =
+    await chrome.storage.local.get(['streamers', 'liveStatus', 'autoJoinStreamers']);
   const updated = streamers.filter((s) => s !== username);
   delete liveStatus[username];
-  await chrome.storage.local.set({ streamers: updated, liveStatus });
+  const updatedAutoJoin = autoJoinStreamers.filter((u) => u !== username);
+  await chrome.storage.local.set({
+    streamers: updated,
+    liveStatus,
+    autoJoinStreamers: updatedAutoJoin,
+  });
   await loadStreamers();
 }
 
@@ -165,7 +123,6 @@ async function loadAuthStatus() {
   const { kickUser, kickAccessToken } = await chrome.storage.local.get(['kickUser', 'kickAccessToken']);
 
   if (kickAccessToken && kickUser) {
-    // ログイン済み表示
     loginForm.classList.add('hidden');
     loginStatus.classList.remove('hidden');
     authUsername.textContent = kickUser.username || kickUser.name || kickUser.slug || '—';
@@ -198,6 +155,7 @@ async function loadStreamers() {
   if (streamers.length === 0) {
     streamerList.appendChild(emptyState);
     emptyState.classList.remove('hidden');
+    liveCount.classList.add('hidden');
     return;
   }
 
@@ -208,61 +166,55 @@ async function loadStreamers() {
     return bLive - aLive;
   });
 
+  // ライブ中カウント更新
+  const liveNum = sorted.filter((u) => liveStatus[u]?.isLive).length;
+  if (liveNum > 0) {
+    liveCount.textContent = `${liveNum} LIVE`;
+    liveCount.classList.remove('hidden');
+  } else {
+    liveCount.classList.add('hidden');
+  }
+
+  const { autoJoinStreamers = [] } = await chrome.storage.local.get('autoJoinStreamers');
+
   for (const username of sorted) {
     const status = liveStatus[username];
-    const li = await createStreamerTile(username, status);
+    const autoJoin = autoJoinStreamers.includes(username);
+    const li = createStreamerRow(username, status, autoJoin);
     streamerList.appendChild(li);
   }
 }
 
-async function createStreamerTile(username, status) {
+function createStreamerRow(username, status, autoJoin) {
   const isLive = status?.isLive || false;
-  const { autoJoinStreamers = [] } = await chrome.storage.local.get('autoJoinStreamers');
-  const autoJoin = autoJoinStreamers.includes(username);
+  const avatarSrc = status?.avatar || status?.thumbnail || 'icons/icon48.png';
+  const title = status?.title || '';
+  const viewers = status?.viewers || 0;
 
   const li = document.createElement('li');
-  li.className = `tile-item${isLive ? ' is-live' : ''}`;
-
-  const thumbSrc = status?.thumbnail || '';
-  const avatarSrc = status?.avatar || status?.thumbnail || 'icons/icon48.png';
-
-  // サムネイル部分
-  const thumbHtml = isLive && thumbSrc
-    ? `<a class="tile-thumb" href="https://kick.com/${username}" target="_blank">
-        <img src="${thumbSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
-        <span class="tile-badge-live">LIVE</span>
-        ${status.viewers > 0 ? `<span class="tile-badge-viewers">${status.viewers.toLocaleString()}人視聴中</span>` : ''}
-       </a>`
-    : `<a class="tile-thumb" href="https://kick.com/${username}" target="_blank">
-        <div class="tile-thumb-offline">
-          <img src="${avatarSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
-        </div>
-        ${isLive ? '<span class="tile-badge-live">LIVE</span>' : ''}
-       </a>`;
-
-  // タイトル or オフライン表示
-  const subHtml = isLive && status?.title
-    ? `<div class="tile-title">${status.title}</div>`
-    : (!isLive ? `<div class="tile-offline">オフライン</div>` : '');
+  li.className = 'streamer-item';
 
   li.innerHTML = `
-    ${thumbHtml}
-    <div class="tile-info">
-      <div class="tile-top">
-        <img class="tile-avatar" src="${avatarSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
-        <a class="tile-username" href="https://kick.com/${username}" target="_blank">${username}</a>
-        <div class="tile-actions">
-          <div class="toggle-sm${autoJoin ? ' active' : ''}" data-user="${username}" title="自動入場">
-            <div class="toggle-thumb"></div>
-          </div>
-          <button class="btn-danger-sm remove-btn" title="削除">×</button>
-        </div>
+    <div class="avatar-wrap${isLive ? ' is-live' : ''}">
+      <img src="${avatarSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
+      ${isLive ? '<span class="live-dot"></span>' : ''}
+    </div>
+    <div class="item-info">
+      <a class="item-title${isLive ? '' : ' offline'}" href="https://kick.com/${username}" target="_blank">
+        ${isLive && title ? title : isLive ? username : 'オフライン'}
+      </a>
+      <a class="item-username" href="https://kick.com/${username}" target="_blank">${username}</a>
+      ${isLive && viewers > 0 ? `<span class="item-viewers">${viewers.toLocaleString()}人視聴中</span>` : ''}
+    </div>
+    <div class="item-actions">
+      <div class="toggle-sm${autoJoin ? ' active' : ''}" title="自動入場">
+        <div class="toggle-thumb"></div>
       </div>
-      ${subHtml}
+      <button class="btn-remove" title="削除">✕</button>
     </div>
   `;
 
-  li.querySelector('.remove-btn').addEventListener('click', (e) => {
+  li.querySelector('.btn-remove').addEventListener('click', (e) => {
     e.stopPropagation();
     removeStreamer(username);
   });
