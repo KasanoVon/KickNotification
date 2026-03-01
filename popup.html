@@ -25,7 +25,7 @@
         <button id="addBtn" class="btn btn-primary">追加</button>
       </div>
       <button id="syncFollowsBtn" class="btn btn-sync">フォロー中を同期</button>
-      <p class="sync-note">※ 同期には kick.com を開いている必要があります。同期後は不要です。</p>
+      <p class="sync-note">※ フォロー中ページを自動で開いてフォローリストを一括登録します</p>
       <p id="errorMsg" class="error-msg hidden"></p>
     </section>
 
@@ -63,24 +63,12 @@
       <p id="loginError" class="error-msg hidden"></p>
     </section>
 
-    <section class="settings-section">
-      <label class="setting-row" id="autoJoinRow">
-        <div class="setting-info">
-          <span class="setting-name">自動入場</span>
-          <span class="setting-desc">配信開始時に自動でタブを開く</span>
-        </div>
-        <div class="toggle" id="autoJoinToggle">
-          <div class="toggle-thumb"></div>
-        </div>
-      </label>
-    </section>
-
     <section class="streamers-section">
       <div class="section-header">
         <span class="section-title">登録済みストリーマー</span>
         <button id="checkNowBtn" class="btn btn-secondary btn-sm">今すぐ確認</button>
       </div>
-      <ul id="streamerList" class="streamer-list">
+      <ul id="streamerList" class="streamer-list tile-grid">
         <li class="empty-state" id="emptyState">
           ストリーマーがまだ登録されていません
         </li>

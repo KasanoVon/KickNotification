@@ -35,6 +35,17 @@ async function getFollowedWithRetry() {
 function getFollowedFromDOM() {
   const channels = new Set();
 
+  // 戦略0: section[data-showingmore] a[data-focus-target="true"]（フォロー中ページ専用）
+  const followSection = document.querySelector('section[data-showingmore]');
+  if (followSection) {
+    followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
+      const href = a.getAttribute('href') || '';
+      const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+      if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+    });
+    if (channels.size > 0) return [...channels];
+  }
+
   // 戦略1: 「フォロー中」「Following」テキストを持つ要素の近隣リンクを探す
   const byText = extractByFollowingSection();
   byText.forEach((s) => channels.add(s));

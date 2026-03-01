@@ -7,7 +7,6 @@ const checkNowBtn = document.getElementById('checkNowBtn');
 const streamerList = document.getElementById('streamerList');
 const emptyState = document.getElementById('emptyState');
 const errorMsg = document.getElementById('errorMsg');
-const autoJoinToggle = document.getElementById('autoJoinToggle');
 
 // OAuth UI
 const loginForm = document.getElementById('loginForm');
@@ -22,7 +21,7 @@ const loginError = document.getElementById('loginError');
 
 // 初期化
 document.addEventListener('DOMContentLoaded', async () => {
-  await Promise.all([loadStreamers(), loadSettings(), loadAuthStatus()]);
+  await Promise.all([loadStreamers(), loadAuthStatus()]);
 });
 
 // ストリーマー追加
@@ -33,12 +32,6 @@ usernameInput.addEventListener('keydown', (e) => {
 
 // フォロー中を同期ボタン
 syncFollowsBtn.addEventListener('click', syncFollowedChannels);
-
-// 自動入場トグル
-autoJoinToggle.addEventListener('click', async () => {
-  const isActive = autoJoinToggle.classList.toggle('active');
-  await chrome.storage.local.set({ autoJoin: isActive });
-});
 
 // Kick ログイン
 loginBtn.addEventListener('click', async () => {
@@ -168,11 +161,6 @@ async function removeStreamer(username) {
   await loadStreamers();
 }
 
-async function loadSettings() {
-  const { autoJoin = false } = await chrome.storage.local.get('autoJoin');
-  autoJoinToggle.classList.toggle('active', autoJoin);
-}
-
 async function loadAuthStatus() {
   const { kickUser, kickAccessToken } = await chrome.storage.local.get(['kickUser', 'kickAccessToken']);
 
@@ -222,30 +210,56 @@ async function loadStreamers() {
 
   for (const username of sorted) {
     const status = liveStatus[username];
-    const li = createStreamerItem(username, status);
+    const li = await createStreamerTile(username, status);
     streamerList.appendChild(li);
   }
 }
 
-function createStreamerItem(username, status) {
+async function createStreamerTile(username, status) {
   const isLive = status?.isLive || false;
-  const li = document.createElement('li');
-  li.className = `streamer-item${isLive ? ' is-live' : ''}`;
+  const { autoJoinStreamers = [] } = await chrome.storage.local.get('autoJoinStreamers');
+  const autoJoin = autoJoinStreamers.includes(username);
 
-  const avatarSrc = status?.thumbnail || 'icons/icon48.png';
-  const metaText = buildMetaText(status);
+  const li = document.createElement('li');
+  li.className = `tile-item${isLive ? ' is-live' : ''}`;
+
+  const thumbSrc = status?.thumbnail || '';
+  const avatarSrc = status?.avatar || status?.thumbnail || 'icons/icon48.png';
+
+  // サムネイル部分
+  const thumbHtml = isLive && thumbSrc
+    ? `<a class="tile-thumb" href="https://kick.com/${username}" target="_blank">
+        <img src="${thumbSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
+        <span class="tile-badge-live">LIVE</span>
+        ${status.viewers > 0 ? `<span class="tile-badge-viewers">${status.viewers.toLocaleString()}人視聴中</span>` : ''}
+       </a>`
+    : `<a class="tile-thumb" href="https://kick.com/${username}" target="_blank">
+        <div class="tile-thumb-offline">
+          <img src="${avatarSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
+        </div>
+        ${isLive ? '<span class="tile-badge-live">LIVE</span>' : ''}
+       </a>`;
+
+  // タイトル or オフライン表示
+  const subHtml = isLive && status?.title
+    ? `<div class="tile-title">${status.title}</div>`
+    : (!isLive ? `<div class="tile-offline">オフライン</div>` : '');
 
   li.innerHTML = `
-    <img class="streamer-avatar" src="${avatarSrc}" alt="${username}"
-         onerror="this.src='icons/icon48.png'" />
-    <div class="streamer-info">
-      <div class="streamer-name">
-        <a href="https://kick.com/${username}" target="_blank">${username}</a>
-        ${isLive ? '<span class="live-badge">LIVE</span>' : ''}
+    ${thumbHtml}
+    <div class="tile-info">
+      <div class="tile-top">
+        <img class="tile-avatar" src="${avatarSrc}" alt="${username}" onerror="this.src='icons/icon48.png'" />
+        <a class="tile-username" href="https://kick.com/${username}" target="_blank">${username}</a>
+        <div class="tile-actions">
+          <div class="toggle-sm${autoJoin ? ' active' : ''}" data-user="${username}" title="自動入場">
+            <div class="toggle-thumb"></div>
+          </div>
+          <button class="btn-danger-sm remove-btn" title="削除">×</button>
+        </div>
       </div>
-      ${metaText ? `<div class="streamer-meta">${metaText}</div>` : ''}
+      ${subHtml}
     </div>
-    <button class="btn btn-danger remove-btn" title="削除">×</button>
   `;
 
   li.querySelector('.remove-btn').addEventListener('click', (e) => {
@@ -253,23 +267,18 @@ function createStreamerItem(username, status) {
     removeStreamer(username);
   });
 
+  li.querySelector('.toggle-sm').addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const toggle = e.currentTarget;
+    const isActive = toggle.classList.toggle('active');
+    const { autoJoinStreamers: current = [] } = await chrome.storage.local.get('autoJoinStreamers');
+    const updated = isActive
+      ? [...new Set([...current, username])]
+      : current.filter((u) => u !== username);
+    await chrome.storage.local.set({ autoJoinStreamers: updated });
+  });
+
   return li;
-}
-
-function buildMetaText(status) {
-  if (!status?.isLive) return 'オフライン';
-
-  const parts = [];
-  if (status.viewers > 0) {
-    parts.push(`<span class="viewers">${status.viewers.toLocaleString()} 人視聴中</span>`);
-  }
-  if (status.category) {
-    parts.push(status.category);
-  }
-  if (status.title) {
-    parts.push(status.title);
-  }
-  return parts.join(' · ');
 }
 
 function showError(msg) {

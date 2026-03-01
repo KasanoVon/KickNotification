@@ -8,7 +8,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #0e0e10;
   color: #efeff1;
-  width: 340px;
+  width: 440px;
   min-height: 200px;
 }
 
@@ -147,7 +147,7 @@ input[type='text']::placeholder {
   display: none;
 }
 
-/* ストリーマーリスト */
+/* ストリーマーセクション */
 .streamers-section {
   display: flex;
   flex-direction: column;
@@ -168,12 +168,16 @@ input[type='text']::placeholder {
   letter-spacing: 0.04em;
 }
 
+/* タイルグリッド */
 .streamer-list {
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 280px;
+}
+
+.streamer-list.tile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-height: 420px;
   overflow-y: auto;
 }
 
@@ -192,63 +196,64 @@ input[type='text']::placeholder {
 
 /* 空の状態 */
 .empty-state {
+  grid-column: 1 / -1;
   color: #6e6e7a;
   font-size: 13px;
   text-align: center;
   padding: 20px 0;
 }
 
-/* ストリーマーアイテム */
-.streamer-item {
+/* タイルアイテム */
+.tile-item {
   background: #18181b;
   border: 1px solid #2a2a2d;
   border-radius: 8px;
-  padding: 8px 10px;
+  overflow: hidden;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
   transition: border-color 0.15s;
 }
 
-.streamer-item.is-live {
+.tile-item.is-live {
   border-color: #53fc18;
 }
 
-.streamer-avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
+/* サムネイル部分 */
+.tile-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #0e0e10;
+  text-decoration: none;
+}
+
+.tile-thumb img {
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  background: #2a2a2d;
-  flex-shrink: 0;
 }
 
-.streamer-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.streamer-name {
+.tile-thumb-offline {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  background: #12121a;
 }
 
-.streamer-name a {
-  font-size: 13px;
-  font-weight: 700;
-  color: #efeff1;
-  text-decoration: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tile-thumb-offline img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  opacity: 0.45;
 }
 
-.streamer-name a:hover {
-  color: #53fc18;
-}
-
-.live-badge {
+.tile-badge-live {
+  position: absolute;
+  top: 5px;
+  left: 5px;
   background: #53fc18;
   color: #0e0e10;
   font-size: 9px;
@@ -256,21 +261,125 @@ input[type='text']::placeholder {
   padding: 1px 5px;
   border-radius: 3px;
   text-transform: uppercase;
+}
+
+.tile-badge-viewers {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #efeff1;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* 情報エリア */
+.tile-info {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.tile-top {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tile-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #2a2a2d;
   flex-shrink: 0;
 }
 
-.streamer-meta {
-  font-size: 11px;
+.tile-username {
+  font-size: 12px;
+  font-weight: 700;
+  color: #efeff1;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tile-username:hover {
+  color: #53fc18;
+}
+
+.tile-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.tile-title {
+  font-size: 10px;
   color: #adadb8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 2px;
 }
 
-.viewers {
-  color: #53fc18;
-  font-weight: 600;
+.tile-offline {
+  font-size: 10px;
+  color: #6e6e7a;
+}
+
+/* タイル内の小さな自動入場トグル */
+.toggle-sm {
+  width: 28px;
+  height: 16px;
+  background: #3a3a3d;
+  border-radius: 8px;
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-sm.active {
+  background: #53fc18;
+}
+
+.toggle-sm .toggle-thumb {
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.toggle-sm.active .toggle-thumb {
+  left: 14px;
+}
+
+.btn-danger-sm {
+  background: transparent;
+  color: #f04040;
+  font-size: 14px;
+  padding: 0 3px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.btn-danger-sm:hover {
+  background: rgba(240, 64, 64, 0.15);
 }
 
 /* Kick 連携セクション */
@@ -377,65 +486,3 @@ input[type='text']::placeholder {
   line-height: 1.4;
 }
 
-/* 設定セクション */
-.settings-section {
-  border-top: 1px solid #2a2a2d;
-  padding-top: 10px;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.setting-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.setting-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #efeff1;
-}
-
-.setting-desc {
-  font-size: 11px;
-  color: #6e6e7a;
-}
-
-/* トグルスイッチ */
-.toggle {
-  width: 38px;
-  height: 22px;
-  background: #3a3a3d;
-  border-radius: 11px;
-  position: relative;
-  flex-shrink: 0;
-  transition: background 0.2s;
-}
-
-.toggle.active {
-  background: #53fc18;
-}
-
-.toggle-thumb {
-  width: 18px;
-  height: 18px;
-  background: #fff;
-  border-radius: 50%;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: left 0.2s;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.toggle.active .toggle-thumb {
-  left: 18px;
-}

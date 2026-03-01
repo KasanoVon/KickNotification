@@ -218,7 +218,8 @@ async function checkAllStreams() {
           title: channelData.livestream?.session_title || '',
           category: channelData.livestream?.categories?.[0]?.name || '',
           viewers: channelData.livestream?.viewer_count || 0,
-          thumbnail: channelData.user?.profile_pic || '',
+          thumbnail: channelData.livestream?.thumbnail?.url || channelData.user?.profile_pic || '',
+          avatar: channelData.user?.profile_pic || '',
         };
 
         const wasLive = previousStatus[username]?.isLive || false;
@@ -251,7 +252,8 @@ async function fetchChannelData(username) {
 }
 
 async function sendNotification(username, info) {
-  const { autoJoin = false } = await chrome.storage.local.get('autoJoin');
+  const { autoJoinStreamers = [] } = await chrome.storage.local.get('autoJoinStreamers');
+  const autoJoin = autoJoinStreamers.includes(username);
 
   // 自動入場が有効なら配信ページを自動で開く
   if (autoJoin) {
@@ -326,7 +328,7 @@ async function syncFollowedChannels() {
 
     if (tabs.length === 0) {
       // kick.com タブを自動でバックグラウンド起動
-      autoTab = await chrome.tabs.create({ url: 'https://kick.com', active: false });
+      autoTab = await chrome.tabs.create({ url: 'https://kick.com/following', active: false });
       await waitForTabLoad(autoTab.id);
       await sleep(2500); // Vue レンダリング待機
       tabs = [autoTab];
@@ -412,6 +414,18 @@ async function readSidebarViaScript(tabId) {
       func: (excludedJson) => {
         const EXCLUDED = new Set(JSON.parse(excludedJson));
         const channels = new Set();
+
+        // 戦略0: section[data-showingmore] a[data-focus-target="true"]（フォロー中ページ専用）
+        const followSection = document.querySelector('section[data-showingmore]');
+        if (followSection) {
+          followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
+            const href = a.getAttribute('href') || '';
+            const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+            if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+          });
+          if (channels.size > 0) return [...channels];
+        }
+
         const vw = document.documentElement.clientWidth || window.innerWidth;
         const sidebarRight = Math.min(Math.max(vw * 0.22, 280), 380);
 
