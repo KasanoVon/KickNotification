@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kick Stream Notifier</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="icons/icon48.png" alt="Kick" class="logo" />
+      <h1>Kick Stream Notifier</h1>
+    </header>
+
+    <section class="add-section">
+      <div class="input-row">
+        <input
+          type="text"
+          id="usernameInput"
+          placeholder="ユーザー名を入力..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="addBtn" class="btn btn-primary">追加</button>
+      </div>
+      <p id="errorMsg" class="error-msg hidden"></p>
+    </section>
+
+    <section class="streamers-section">
+      <div class="section-header">
+        <span class="section-title">登録済みストリーマー</span>
+        <button id="checkNowBtn" class="btn btn-secondary btn-sm">今すぐ確認</button>
+      </div>
+      <ul id="streamerList" class="streamer-list">
+        <li class="empty-state" id="emptyState">
+          ストリーマーがまだ登録されていません
+        </li>
+      </ul>
+    </section>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

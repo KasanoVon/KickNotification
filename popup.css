@@ -1,0 +1,261 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0e0e10;
+  color: #efeff1;
+  width: 340px;
+  min-height: 200px;
+}
+
+.container {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ヘッダー */
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #2a2a2d;
+}
+
+.logo {
+  width: 28px;
+  height: 28px;
+}
+
+h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #53fc18;
+}
+
+/* 追加セクション */
+.add-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+input[type='text'] {
+  flex: 1;
+  background: #18181b;
+  border: 1px solid #3a3a3d;
+  border-radius: 6px;
+  color: #efeff1;
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+input[type='text']:focus {
+  border-color: #53fc18;
+}
+
+input[type='text']::placeholder {
+  color: #6e6e7a;
+}
+
+/* ボタン */
+.btn {
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  transition: opacity 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #53fc18;
+  color: #0e0e10;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #6fff2e;
+}
+
+.btn-secondary {
+  background: #2a2a2d;
+  color: #efeff1;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #3a3a3d;
+}
+
+.btn-sm {
+  font-size: 11px;
+  padding: 5px 10px;
+}
+
+.btn-danger {
+  background: transparent;
+  color: #f04040;
+  font-size: 18px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.btn-danger:hover {
+  background: rgba(240, 64, 64, 0.15);
+}
+
+/* エラーメッセージ */
+.error-msg {
+  color: #f04040;
+  font-size: 12px;
+  padding-left: 2px;
+}
+
+.hidden {
+  display: none;
+}
+
+/* ストリーマーリスト */
+.streamers-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #adadb8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.streamer-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.streamer-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.streamer-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.streamer-list::-webkit-scrollbar-thumb {
+  background: #3a3a3d;
+  border-radius: 2px;
+}
+
+/* 空の状態 */
+.empty-state {
+  color: #6e6e7a;
+  font-size: 13px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* ストリーマーアイテム */
+.streamer-item {
+  background: #18181b;
+  border: 1px solid #2a2a2d;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.15s;
+}
+
+.streamer-item.is-live {
+  border-color: #53fc18;
+}
+
+.streamer-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #2a2a2d;
+  flex-shrink: 0;
+}
+
+.streamer-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.streamer-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.streamer-name a {
+  font-size: 13px;
+  font-weight: 700;
+  color: #efeff1;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.streamer-name a:hover {
+  color: #53fc18;
+}
+
+.live-badge {
+  background: #53fc18;
+  color: #0e0e10;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.streamer-meta {
+  font-size: 11px;
+  color: #adadb8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.viewers {
+  color: #53fc18;
+  font-weight: 600;
+}
