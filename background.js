@@ -153,41 +153,27 @@ async function syncFollowedChannels() {
     if (!xsrfToken) {
       return { error: 'kick.com にログインしてから同期してください' };
     }
+    const headers = { Accept: 'application/json', 'X-XSRF-TOKEN': xsrfToken };
 
-    const headers = {
-      Accept: 'application/json',
-      'X-XSRF-TOKEN': xsrfToken,
-    };
+    // Step 1: user_id なしで直接フォロー済み API を試す
+    let followedUsernames = await tryFollowedDirect(headers);
 
-    // 自分のユーザー情報を取得（v1 → v2 の順に試す）
-    let userId = null;
-    for (const endpoint of [
-      'https://kick.com/api/v1/user',
-      'https://kick.com/api/v2/user',
-    ]) {
-      const res = await fetch(endpoint, { credentials: 'include', headers });
-      if (res.status === 401 || res.status === 403) {
-        return { error: 'kick.com にログインしてから同期してください' };
+    // Step 2: 失敗した場合 → kick.com タブからユーザーIDを取得して再試行
+    if (followedUsernames === null) {
+      const userId = await getUserIdFromPage();
+      if (!userId) {
+        return {
+          error:
+            'ユーザーIDを取得できませんでした。kick.com をタブで開いてログインした状態で再試行してください',
+        };
       }
-      if (!res.ok) continue;
-      const data = await parseJsonResponse(res);
-      if (data?.id) {
-        userId = data.id;
-        break;
-      }
+      followedUsernames = await fetchAllFollowedChannels(userId, headers);
     }
 
-    if (!userId) {
-      return { error: 'ユーザー情報を取得できませんでした。kick.com にログイン中か確認してください' };
-    }
-
-    // フォロー中チャンネルを全ページ取得
-    const followedUsernames = await fetchAllFollowedChannels(userId, headers);
-    if (followedUsernames.length === 0) {
+    if (!followedUsernames || followedUsernames.length === 0) {
       return { error: 'フォロー中のチャンネルが見つかりませんでした' };
     }
 
-    // 既存リストにマージ（重複なし）
     const { streamers = [] } = await chrome.storage.local.get('streamers');
     const merged = [...new Set([...streamers, ...followedUsernames])];
     await chrome.storage.local.set({ streamers: merged });
@@ -201,7 +187,70 @@ async function syncFollowedChannels() {
   }
 }
 
-// 全ページのフォロー中チャンネルを取得（ページネーション対応）
+// user_id なしでフォロー済みチャンネルを直接取得（セッション認証のみ）
+// 成功すれば配列を返す。エンドポイントが対応していない場合は null を返す
+async function tryFollowedDirect(headers) {
+  const res = await fetch('https://kick.com/api/v2/channels/followed', {
+    credentials: 'include',
+    headers,
+  });
+  if (res.status === 401 || res.status === 403) return null;
+  if (!res.ok) return null;
+
+  const data = await parseJsonResponse(res);
+  if (!data) return null;
+
+  const channels = Array.isArray(data) ? data : (data.data || data.channels || []);
+  // 空配列は「フォローなし」ではなく「user_id 必要」の可能性があるため null で区別
+  if (channels.length === 0 && !Array.isArray(data)) return null;
+
+  return channels
+    .map((ch) => ch.slug || ch.channel_slug || ch.username)
+    .filter(Boolean)
+    .map((n) => n.toLowerCase());
+}
+
+// kick.com の開いているタブのページ状態からユーザーIDを取得
+async function getUserIdFromPage() {
+  const tabs = await chrome.tabs.query({ url: 'https://kick.com/*' });
+  if (tabs.length === 0) return null;
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: () => {
+        // Nuxt 3 の payload からユーザー情報を探す
+        try {
+          const el = document.getElementById('__NUXT_DATA__');
+          if (el) {
+            const payload = JSON.parse(el.textContent);
+            const str = JSON.stringify(payload);
+            const m = str.match(/"id":(\d+),"username":/);
+            if (m) return parseInt(m[1], 10);
+          }
+        } catch {}
+
+        // フォールバック: グローバル変数を探す
+        try {
+          const app = window.__nuxt_app__ || window.__nuxt__;
+          const user =
+            app?.config?.globalProperties?.$auth?.user ||
+            app?.payload?.data?.user ||
+            app?.ssrContext?.payload?.data?.user;
+          if (user?.id) return user.id;
+        } catch {}
+
+        return null;
+      },
+    });
+    return results?.[0]?.result ?? null;
+  } catch (err) {
+    console.error('getUserIdFromPage error:', err);
+    return null;
+  }
+}
+
+// user_id を指定してフォロー済みチャンネルを全ページ取得
 async function fetchAllFollowedChannels(userId, headers) {
   const usernames = [];
   let cursor = null;

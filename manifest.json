@@ -7,7 +7,9 @@
     "notifications",
     "storage",
     "alarms",
-    "cookies"
+    "cookies",
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://kick.com/*"
