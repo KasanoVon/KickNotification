@@ -46,6 +46,14 @@ function getFollowedFromDOM() {
     if (channels.size > 0) return [...channels];
   }
 
+  // 戦略0.5: class="relative flex h-full flex-col gap-4" のコンテナからリンク取得（サイドバー）
+  document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+    if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+  });
+  if (channels.size > 0) return [...channels];
+
   // 戦略1: 「フォロー中」「Following」テキストを持つ要素の近隣リンクを探す
   const byText = extractByFollowingSection();
   byText.forEach((s) => channels.add(s));
