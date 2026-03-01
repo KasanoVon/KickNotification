@@ -123,6 +123,19 @@ input[type='text']::placeholder {
   background: rgba(240, 64, 64, 0.15);
 }
 
+.btn-sync {
+  background: #18181b;
+  border: 1px solid #53fc18;
+  color: #53fc18;
+  width: 100%;
+  font-size: 13px;
+  padding: 7px 14px;
+}
+
+.btn-sync:hover:not(:disabled) {
+  background: rgba(83, 252, 24, 0.1);
+}
+
 /* エラーメッセージ */
 .error-msg {
   color: #f04040;

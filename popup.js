@@ -2,6 +2,7 @@
 
 const usernameInput = document.getElementById('usernameInput');
 const addBtn = document.getElementById('addBtn');
+const syncFollowsBtn = document.getElementById('syncFollowsBtn');
 const checkNowBtn = document.getElementById('checkNowBtn');
 const streamerList = document.getElementById('streamerList');
 const emptyState = document.getElementById('emptyState');
@@ -16,6 +17,9 @@ usernameInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') addStreamer();
 });
 
+// フォロー中を同期ボタン
+syncFollowsBtn.addEventListener('click', syncFollowedChannels);
+
 // 今すぐ確認ボタン
 checkNowBtn.addEventListener('click', () => {
   checkNowBtn.disabled = true;
@@ -28,6 +32,93 @@ checkNowBtn.addEventListener('click', () => {
     }, 1500);
   });
 });
+
+// フォロー中チャンネルを取得して一括登録
+async function syncFollowedChannels() {
+  syncFollowsBtn.disabled = true;
+  syncFollowsBtn.textContent = '取得中...';
+  hideError();
+
+  try {
+    // ログイン中のセッションクッキーを使ってKick APIから自分の情報を取得
+    const meRes = await fetch('https://kick.com/api/v2/user', {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (meRes.status === 401 || meRes.status === 403) {
+      showError('kick.com にログインしてから同期してください');
+      return;
+    }
+    if (!meRes.ok) {
+      showError('ユーザー情報の取得に失敗しました');
+      return;
+    }
+
+    const me = await meRes.json();
+    const userId = me.id;
+    if (!userId) {
+      showError('ユーザーIDを取得できませんでした');
+      return;
+    }
+
+    // フォロー中チャンネルを全ページ取得
+    const followedUsernames = await fetchAllFollowedChannels(userId);
+    if (followedUsernames.length === 0) {
+      showError('フォロー中のチャンネルが見つかりませんでした');
+      return;
+    }
+
+    // 既存リストにマージ（重複なし）
+    const { streamers = [] } = await chrome.storage.local.get('streamers');
+    const merged = [...new Set([...streamers, ...followedUsernames])];
+    await chrome.storage.local.set({ streamers: merged });
+
+    const added = merged.length - streamers.length;
+    await loadStreamers();
+    chrome.runtime.sendMessage({ type: 'CHECK_NOW' });
+
+    syncFollowsBtn.textContent = `${added}件追加しました`;
+    setTimeout(() => {
+      syncFollowsBtn.textContent = 'フォロー中を同期';
+    }, 2500);
+  } catch {
+    showError('ネットワークエラーが発生しました');
+  } finally {
+    syncFollowsBtn.disabled = false;
+  }
+}
+
+// 全ページのフォロー中チャンネルを取得（ページネーション対応）
+async function fetchAllFollowedChannels(userId) {
+  const usernames = [];
+  let cursor = null;
+
+  do {
+    const url = new URL(`https://kick.com/api/v2/channels/followed`);
+    url.searchParams.set('user_id', userId);
+    if (cursor) url.searchParams.set('cursor', cursor);
+
+    const res = await fetch(url.toString(), {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!res.ok) break;
+
+    const data = await res.json();
+    const channels = data.data || data.channels || data || [];
+
+    for (const ch of channels) {
+      const name = ch.slug || ch.channel_slug || ch.username;
+      if (name) usernames.push(name.toLowerCase());
+    }
+
+    cursor = data.next_cursor || data.cursor || null;
+  } while (cursor);
+
+  return usernames;
+}
 
 async function addStreamer() {
   const username = usernameInput.value.trim().toLowerCase();
