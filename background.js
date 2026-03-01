@@ -312,47 +312,70 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // アプローチ0: 公式 OAuth API（kick.com タブ不要）
 // アプローチ1: content.js (DOM scraping) に依頼
 // アプローチ2: executeScript で直接 DOM を読む（content.js 未ロード時のフォールバック）
+// ※ kick.com タブが開いていない場合は自動でバックグラウンドタブを開いて取得後に閉じる
 async function syncFollowedChannels() {
   try {
     // アプローチ0: OAuth トークンがあれば公式 API を試す
     const oauthResult = await getFollowedViaOAuth();
-    if (oauthResult !== null) {
-      if (oauthResult.length > 0) return await mergeAndSave(oauthResult);
-      // トークンはあるが結果が空 = エンドポイント未公開の可能性 → DOM フォールバック
+    if (oauthResult !== null && oauthResult.length > 0) {
+      return await mergeAndSave(oauthResult);
     }
 
-    const tabs = await chrome.tabs.query({ url: 'https://kick.com/*' });
+    let tabs = await chrome.tabs.query({ url: 'https://kick.com/*' });
+    let autoTab = null;
+
     if (tabs.length === 0) {
-      const hasToken = !!(await getValidToken());
-      return {
-        error: hasToken
-          ? '公式APIではフォロー一覧が未公開のため、kick.com をタブで開いてから再試行してください'
-          : 'kick.com をタブで開いてログインした状態で再試行してください（またはKick連携でログインしてください）',
-      };
+      // kick.com タブを自動でバックグラウンド起動
+      autoTab = await chrome.tabs.create({ url: 'https://kick.com', active: false });
+      await waitForTabLoad(autoTab.id);
+      await sleep(2500); // Vue レンダリング待機
+      tabs = [autoTab];
     }
 
     const tabId = tabs[0].id;
 
-    // アプローチ1: content.js に DOM 読み取りを依頼
-    const contentResult = await askContentScript(tabId);
-    if (contentResult.length > 0) {
-      return await mergeAndSave(contentResult);
-    }
+    try {
+      // アプローチ1: content.js に DOM 読み取りを依頼
+      const contentResult = await askContentScript(tabId);
+      if (contentResult.length > 0) {
+        return await mergeAndSave(contentResult);
+      }
 
-    // アプローチ2: executeScript で DOM を直接読む（リトライあり）
-    const scriptResult = await readSidebarViaScript(tabId);
-    if (scriptResult.length > 0) {
-      return await mergeAndSave(scriptResult);
-    }
+      // アプローチ2: executeScript で DOM を直接読む（リトライあり）
+      const scriptResult = await readSidebarViaScript(tabId);
+      if (scriptResult.length > 0) {
+        return await mergeAndSave(scriptResult);
+      }
 
-    return {
-      error:
-        'サイドバーからチャンネルを読み取れませんでした。\nkick.com のホーム画面を開いた状態でお試しください。',
-    };
+      return {
+        error:
+          'フォロー中チャンネルを読み取れませんでした。\nkick.com にログインした状態でお試しください。',
+      };
+    } finally {
+      // 自動で開いたタブは閉じる
+      if (autoTab) chrome.tabs.remove(autoTab.id).catch(() => {});
+    }
   } catch (err) {
     console.error('syncFollowedChannels error:', err);
     return { error: `エラー: ${err.message}` };
   }
+}
+
+// タブのページ読み込み完了を待機（最大 15 秒）
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    const listener = (id, changeInfo) => {
+      if (id === tabId && changeInfo.status === 'complete') {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve();
+    }, 15000);
+  });
 }
 
 // content.js へメッセージを送りフォロー中チャンネルを取得
