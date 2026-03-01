@@ -265,15 +265,17 @@ async function sendNotification(username, info) {
     ? `${info.title}${info.category ? ` [${info.category}]` : ''}`
     : '配信を開始しました';
 
-  chrome.notifications.create(notifId, {
-    type: 'basic',
-    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-    title: `🟢 ${username} が配信開始！${autoJoin ? ' (自動入場)' : ''}`,
-    message,
-    contextMessage: info.viewers > 0 ? `${info.viewers.toLocaleString()} 人が視聴中` : '',
-    priority: 2,
-    requireInteraction: false,
-  });
+  try {
+    await chrome.notifications.create(notifId, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+      title: `${username} が配信開始！${autoJoin ? ' (自動入場)' : ''}`,
+      message,
+      priority: 2,
+    });
+  } catch (err) {
+    console.warn('Notification creation failed:', err.message);
+  }
 }
 
 chrome.notifications.onClicked.addListener((notifId) => {
