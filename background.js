@@ -116,10 +116,88 @@ chrome.notifications.onClicked.addListener((notifId) => {
   }
 });
 
-// メッセージリスナー（popupからの即時チェックリクエスト）
+// メッセージリスナー（popupからのリクエスト）
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'CHECK_NOW') {
     checkAllStreams().then(() => sendResponse({ success: true }));
-    return true; // 非同期レスポンスのためtrueを返す
+    return true;
+  }
+  if (message.type === 'SYNC_FOLLOWS') {
+    syncFollowedChannels().then(sendResponse);
+    return true;
   }
 });
+
+// フォロー中チャンネルを取得してストレージに保存
+// Service Workerからの fetch は host_permissions により CORS をバイパスできる
+async function syncFollowedChannels() {
+  try {
+    // ログイン中セッションで自分のユーザー情報を取得
+    const meRes = await fetch('https://kick.com/api/v2/user', {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (meRes.status === 401 || meRes.status === 403) {
+      return { error: 'kick.com にログインしてから同期してください' };
+    }
+    if (!meRes.ok) {
+      return { error: `ユーザー情報の取得に失敗しました (HTTP ${meRes.status})` };
+    }
+
+    const me = await meRes.json();
+    const userId = me.id;
+    if (!userId) {
+      return { error: 'ユーザーIDを取得できませんでした' };
+    }
+
+    // フォロー中チャンネルを全ページ取得
+    const followedUsernames = await fetchAllFollowedChannels(userId);
+    if (followedUsernames.length === 0) {
+      return { error: 'フォロー中のチャンネルが見つかりませんでした' };
+    }
+
+    // 既存リストにマージ（重複なし）
+    const { streamers = [] } = await chrome.storage.local.get('streamers');
+    const merged = [...new Set([...streamers, ...followedUsernames])];
+    await chrome.storage.local.set({ streamers: merged });
+
+    const added = merged.length - streamers.length;
+    checkAllStreams();
+    return { success: true, added };
+  } catch (err) {
+    console.error('syncFollowedChannels error:', err);
+    return { error: `エラー: ${err.message}` };
+  }
+}
+
+// 全ページのフォロー中チャンネルを取得（ページネーション対応）
+async function fetchAllFollowedChannels(userId) {
+  const usernames = [];
+  let cursor = null;
+
+  do {
+    const url = new URL('https://kick.com/api/v2/channels/followed');
+    url.searchParams.set('user_id', userId);
+    if (cursor) url.searchParams.set('cursor', cursor);
+
+    const res = await fetch(url.toString(), {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!res.ok) break;
+
+    const data = await res.json();
+    const channels = Array.isArray(data) ? data : (data.data || data.channels || []);
+
+    for (const ch of channels) {
+      const name = ch.slug || ch.channel_slug || ch.username;
+      if (name) usernames.push(name.toLowerCase());
+    }
+
+    cursor = data.next_cursor || data.cursor || null;
+  } while (cursor);
+
+  return usernames;
+}
