@@ -128,31 +128,61 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
+// kick.com の XSRF-TOKEN クッキーを取得する（Laravel CSRF 対策）
+function getXsrfToken() {
+  return new Promise((resolve) => {
+    chrome.cookies.get({ url: 'https://kick.com', name: 'XSRF-TOKEN' }, (cookie) => {
+      resolve(cookie ? decodeURIComponent(cookie.value) : null);
+    });
+  });
+}
+
+// レスポンスが JSON かチェックしてパースする
+async function parseJsonResponse(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return null; // HTML などが返ってきた場合
+  }
+  return res.json();
+}
+
 // フォロー中チャンネルを取得してストレージに保存
-// Service Workerからの fetch は host_permissions により CORS をバイパスできる
 async function syncFollowedChannels() {
   try {
-    // ログイン中セッションで自分のユーザー情報を取得
-    const meRes = await fetch('https://kick.com/api/v2/user', {
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-
-    if (meRes.status === 401 || meRes.status === 403) {
+    const xsrfToken = await getXsrfToken();
+    if (!xsrfToken) {
       return { error: 'kick.com にログインしてから同期してください' };
     }
-    if (!meRes.ok) {
-      return { error: `ユーザー情報の取得に失敗しました (HTTP ${meRes.status})` };
+
+    const headers = {
+      Accept: 'application/json',
+      'X-XSRF-TOKEN': xsrfToken,
+    };
+
+    // 自分のユーザー情報を取得（v1 → v2 の順に試す）
+    let userId = null;
+    for (const endpoint of [
+      'https://kick.com/api/v1/user',
+      'https://kick.com/api/v2/user',
+    ]) {
+      const res = await fetch(endpoint, { credentials: 'include', headers });
+      if (res.status === 401 || res.status === 403) {
+        return { error: 'kick.com にログインしてから同期してください' };
+      }
+      if (!res.ok) continue;
+      const data = await parseJsonResponse(res);
+      if (data?.id) {
+        userId = data.id;
+        break;
+      }
     }
 
-    const me = await meRes.json();
-    const userId = me.id;
     if (!userId) {
-      return { error: 'ユーザーIDを取得できませんでした' };
+      return { error: 'ユーザー情報を取得できませんでした。kick.com にログイン中か確認してください' };
     }
 
     // フォロー中チャンネルを全ページ取得
-    const followedUsernames = await fetchAllFollowedChannels(userId);
+    const followedUsernames = await fetchAllFollowedChannels(userId, headers);
     if (followedUsernames.length === 0) {
       return { error: 'フォロー中のチャンネルが見つかりませんでした' };
     }
@@ -172,7 +202,7 @@ async function syncFollowedChannels() {
 }
 
 // 全ページのフォロー中チャンネルを取得（ページネーション対応）
-async function fetchAllFollowedChannels(userId) {
+async function fetchAllFollowedChannels(userId, headers) {
   const usernames = [];
   let cursor = null;
 
@@ -181,16 +211,13 @@ async function fetchAllFollowedChannels(userId) {
     url.searchParams.set('user_id', userId);
     if (cursor) url.searchParams.set('cursor', cursor);
 
-    const res = await fetch(url.toString(), {
-      credentials: 'include',
-      headers: { Accept: 'application/json' },
-    });
-
+    const res = await fetch(url.toString(), { credentials: 'include', headers });
     if (!res.ok) break;
 
-    const data = await res.json();
-    const channels = Array.isArray(data) ? data : (data.data || data.channels || []);
+    const data = await parseJsonResponse(res);
+    if (!data) break;
 
+    const channels = Array.isArray(data) ? data : (data.data || data.channels || []);
     for (const ch of channels) {
       const name = ch.slug || ch.channel_slug || ch.username;
       if (name) usernames.push(name.toLowerCase());

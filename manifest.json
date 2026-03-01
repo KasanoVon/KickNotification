@@ -6,7 +6,8 @@
   "permissions": [
     "notifications",
     "storage",
-    "alarms"
+    "alarms",
+    "cookies"
   ],
   "host_permissions": [
     "https://kick.com/*"
