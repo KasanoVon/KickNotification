@@ -2,6 +2,7 @@
 // Kick APIを定期的にポーリングして配信開始を検知する
 
 const CHECK_INTERVAL_MINUTES = 1;
+const SYNC_INTERVAL_MINUTES = 15;
 const KICK_API_BASE = 'https://kick.com/api/v2/channels/';
 const KICK_OAUTH_BASE = 'https://id.kick.com';
 const KICK_PUBLIC_API = 'https://api.kick.com/public/v1';
@@ -189,11 +190,13 @@ chrome.runtime.onStartup.addListener(() => {
 function setupAlarm() {
   chrome.alarms.clearAll(() => {
     chrome.alarms.create('checkStreams', { periodInMinutes: CHECK_INTERVAL_MINUTES });
+    chrome.alarms.create('syncFollows', { periodInMinutes: SYNC_INTERVAL_MINUTES });
   });
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'checkStreams') checkAllStreams();
+  if (alarm.name === 'syncFollows') syncFollowedChannels();
 });
 
 // 登録された全ストリーマーのライブ状態をチェック
