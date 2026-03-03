@@ -428,13 +428,12 @@ async function readSidebarViaScript(tabId) {
         const EXCLUDED = new Set(JSON.parse(excludedJson));
         const NON_FOLLOWING_KEYWORDS = [
           'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
-          'フォローしていない', 'followers', 'フォロワー',
-          'あなたが気に入るかもしれないチャンネル', 'channels you might like',
-          'おすすめ', 'recommended', 'suggested',
+          'フォローしていない', 'あなたが気に入るかもしれないチャンネル',
+          'channels you might like', 'おすすめ', 'recommended', 'suggested',
         ];
 
-        // 「フォロー外」「フォロー待ち」などのセクションに含まれるスラグを除外セットに収集
-        const nonFollowing = new Set();
+        // 非フォローセクションのDOMコンテナを特定（ノード単位で除外）
+        const nonFollowingContainers = [];
         document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li').forEach((el) => {
           if (el.children.length > 0) return;
           const text = el.textContent.trim().toLowerCase();
@@ -442,38 +441,35 @@ async function readSidebarViaScript(tabId) {
           let node = el.parentElement;
           for (let depth = 0; depth < 12; depth++) {
             if (!node || node === document.body) break;
-            const links = node.querySelectorAll('a[href]');
-            if (links.length >= 2) {
-              links.forEach((a) => {
-                const href = a.getAttribute('href') || '';
-                const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-                if (m) nonFollowing.add(m[1].toLowerCase());
-              });
+            if (node.querySelectorAll('a[href]').length >= 2) {
+              nonFollowingContainers.push(node);
               break;
             }
             node = node.parentElement;
           }
         });
 
-        const isAllowed = (slug) => !EXCLUDED.has(slug) && !nonFollowing.has(slug);
+        const isInNonFollowing = (el) => nonFollowingContainers.some((c) => c.contains(el));
         const channels = new Set();
 
         // 戦略0: section[data-showingmore] a[data-focus-target="true"]
         const followSection = document.querySelector('section[data-showingmore]');
         if (followSection) {
           followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
+            if (isInNonFollowing(a)) return;
             const href = a.getAttribute('href') || '';
             const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-            if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+            if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
           });
           if (channels.size > 0) return [...channels];
         }
 
         // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
         document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
+          if (isInNonFollowing(a)) return;
           const href = a.getAttribute('href') || '';
           const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-          if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+          if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
         });
         return [...channels];
       },

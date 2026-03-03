@@ -32,14 +32,13 @@ async function getFollowedWithRetry() {
   return { usernames: [] };
 }
 
-// 「フォロー外」「フォロー待ち」「Pending」などの非フォローセクションに含まれるスラグを返す
-function getNonFollowingSlugs() {
-  const excluded = new Set();
+// 非フォローセクションのDOMコンテナ一覧を返す（スラグではなくノードで除外）
+function getNonFollowingContainers() {
+  const containers = [];
   const NON_FOLLOWING_KEYWORDS = [
     'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
-    'フォローしていない', 'followers', 'フォロワー',
-    'あなたが気に入るかもしれないチャンネル', 'channels you might like',
-    'おすすめ', 'recommended', 'suggested',
+    'フォローしていない', 'あなたが気に入るかもしれないチャンネル',
+    'channels you might like', 'おすすめ', 'recommended', 'suggested',
   ];
 
   document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li').forEach((el) => {
@@ -47,24 +46,19 @@ function getNonFollowingSlugs() {
     const text = el.textContent.trim().toLowerCase();
     if (!NON_FOLLOWING_KEYWORDS.some((kw) => text.includes(kw))) return;
 
-    // 親コンテナを辿ってリンクを収集
+    // 親コンテナを辿り、リンクが複数含まれるノードをセクションとして登録
     let node = el.parentElement;
     for (let depth = 0; depth < 12; depth++) {
       if (!node || node === document.body) break;
-      const links = node.querySelectorAll('a[href]');
-      if (links.length >= 2) {
-        links.forEach((a) => {
-          const href = a.getAttribute('href') || '';
-          const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-          if (m) excluded.add(m[1].toLowerCase());
-        });
+      if (node.querySelectorAll('a[href]').length >= 2) {
+        containers.push(node);
         break;
       }
       node = node.parentElement;
     }
   });
 
-  return excluded;
+  return containers;
 }
 
 function getFollowedFromDOM() {
@@ -72,26 +66,28 @@ function getFollowedFromDOM() {
 
   // /following ページ専用の取得戦略（ノイズのある他の戦略はスキップ）
   if (window.location.pathname === '/following') {
-    const nonFollowing = getNonFollowingSlugs();
-
-    const isAllowed = (slug) => !EXCLUDED.has(slug) && !nonFollowing.has(slug);
+    // 非フォローセクションのコンテナを特定（ノード単位で除外するため）
+    const nonFollowingContainers = getNonFollowingContainers();
+    const isInNonFollowing = (el) => nonFollowingContainers.some((c) => c.contains(el));
 
     // 戦略0: section[data-showingmore] a[data-focus-target="true"]
     const followSection = document.querySelector('section[data-showingmore]');
     if (followSection) {
       followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
+        if (isInNonFollowing(a)) return;
         const href = a.getAttribute('href') || '';
         const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-        if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+        if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
       });
       if (channels.size > 0) return [...channels];
     }
 
     // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
     document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
+      if (isInNonFollowing(a)) return;
       const href = a.getAttribute('href') || '';
       const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-      if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+      if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
     });
     // /following ページなので、空でもリトライに任せて返す
     return [...channels];
