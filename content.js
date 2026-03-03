@@ -35,25 +35,30 @@ async function getFollowedWithRetry() {
 function getFollowedFromDOM() {
   const channels = new Set();
 
-  // 戦略0: section[data-showingmore] a[data-focus-target="true"]（フォロー中ページ専用）
-  const followSection = document.querySelector('section[data-showingmore]');
-  if (followSection) {
-    followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
+  // /following ページ専用の取得戦略（ノイズのある他の戦略はスキップ）
+  if (window.location.pathname === '/following') {
+    // 戦略0: section[data-showingmore] a[data-focus-target="true"]
+    const followSection = document.querySelector('section[data-showingmore]');
+    if (followSection) {
+      followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+        if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+      });
+      if (channels.size > 0) return [...channels];
+    }
+
+    // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
+    document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
       const href = a.getAttribute('href') || '';
       const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
       if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
     });
-    if (channels.size > 0) return [...channels];
+    // /following ページなので、空でもリトライに任せて返す
+    return [...channels];
   }
 
-  // 戦略0.5: class="relative flex h-full flex-col gap-4" のコンテナからリンク取得（サイドバー）
-  document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
-    const href = a.getAttribute('href') || '';
-    const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-    if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-  });
-  if (channels.size > 0) return [...channels];
-
+  // /following 以外のページ（サイドバー経由）の取得戦略
   // 戦略1: 「フォロー中」「Following」テキストを持つ要素の近隣リンクを探す
   const byText = extractByFollowingSection();
   byText.forEach((s) => channels.add(s));

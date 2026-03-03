@@ -325,11 +325,12 @@ async function syncFollowedChannels() {
       return await mergeAndSave(oauthResult);
     }
 
-    let tabs = await chrome.tabs.query({ url: 'https://kick.com/*' });
+    // 常に /following ページのタブを使用する（他のページは不正確な結果を返すため）
+    let tabs = await chrome.tabs.query({ url: 'https://kick.com/following' });
     let autoTab = null;
 
     if (tabs.length === 0) {
-      // kick.com タブを自動でバックグラウンド起動
+      // /following タブを自動でバックグラウンド起動
       autoTab = await chrome.tabs.create({ url: 'https://kick.com/following', active: false });
       await waitForTabLoad(autoTab.id);
       await sleep(2500); // Vue レンダリング待機
@@ -417,7 +418,8 @@ async function readSidebarViaScript(tabId) {
         const EXCLUDED = new Set(JSON.parse(excludedJson));
         const channels = new Set();
 
-        // 戦略0: section[data-showingmore] a[data-focus-target="true"]（フォロー中ページ専用）
+        // /following ページ専用の取得（常にこのページを使用するため）
+        // 戦略0: section[data-showingmore] a[data-focus-target="true"]
         const followSection = document.querySelector('section[data-showingmore]');
         if (followSection) {
           followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
@@ -428,55 +430,13 @@ async function readSidebarViaScript(tabId) {
           if (channels.size > 0) return [...channels];
         }
 
-        // 戦略0.5: class="relative flex h-full flex-col gap-4"（サイドバーのフォロー中）
+        // 戦略0.5: class="relative flex h-full flex-col gap-4"（/following ページのフォロー中グリッド）
         document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
           const href = a.getAttribute('href') || '';
           const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
           if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
         });
-        if (channels.size > 0) return [...channels];
-
-        const vw = document.documentElement.clientWidth || window.innerWidth;
-        const sidebarRight = Math.min(Math.max(vw * 0.22, 280), 380);
-
-        // 戦略1: 左サイドバー位置ベース
-        document.querySelectorAll('a[href]').forEach((a) => {
-          const rect = a.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0 && rect.right <= sidebarRight && rect.left >= 0) {
-            const href = a.getAttribute('href') || '';
-            const m = href.match(/^(?:https?:\/\/kick\.com)?\/([a-zA-Z0-9_]{2,50})$/);
-            if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-          }
-        });
-
-        if (channels.size > 0) return [...channels];
-
-        // 戦略2: テキスト「フォロー中」「Following」の近隣リンク
-        const KEYWORDS = ['フォロー中', 'following', 'followed'];
-        document.querySelectorAll('span, p, h2, h3, h4, div, li, button').forEach((el) => {
-          if (el.children.length > 0) return;
-          const text = el.textContent.trim().toLowerCase();
-          if (!KEYWORDS.includes(text)) return;
-          let node = el.parentElement;
-          for (let d = 0; d < 10; d++) {
-            if (!node || node === document.body) break;
-            node.querySelectorAll('a[href]').forEach((a) => {
-              const href = a.getAttribute('href') || '';
-              const m = href.match(/^(?:https?:\/\/kick\.com)?\/([a-zA-Z0-9_]{2,50})$/);
-              if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-            });
-            if (channels.size > 0) return;
-            node = node.parentElement;
-          }
-        });
-
-        // 戦略3: aside / nav 全スキャン
-        document.querySelectorAll('aside a[href], nav a[href]').forEach((a) => {
-          const href = a.getAttribute('href') || '';
-          const m = href.match(/^(?:https?:\/\/kick\.com)?\/([a-zA-Z0-9_]{2,50})$/);
-          if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-        });
-
+        // /following ページのみ使用するため、結果を返す（空でもリトライに任せる）
         return [...channels];
       },
       args: [EXCLUDED_JSON],
