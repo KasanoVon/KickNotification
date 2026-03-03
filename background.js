@@ -335,13 +335,13 @@ async function syncFollowedChannels() {
       return await mergeAndSave(oauthResult);
     }
 
-    // 常に /following ページのタブを使用する（他のページは不正確な結果を返すため）
-    let tabs = await chrome.tabs.query({ url: 'https://kick.com/following' });
+    // 常に /following/channels ページのタブを使用する（他のページは不正確な結果を返すため）
+    let tabs = await chrome.tabs.query({ url: 'https://kick.com/following/channels' });
     let autoTab = null;
 
     if (tabs.length === 0) {
-      // /following タブを自動でバックグラウンド起動
-      autoTab = await chrome.tabs.create({ url: 'https://kick.com/following', active: false });
+      // /following/channels タブを自動でバックグラウンド起動
+      autoTab = await chrome.tabs.create({ url: 'https://kick.com/following/channels', active: false });
       await waitForTabLoad(autoTab.id);
       await sleep(2500); // Vue レンダリング待機
       tabs = [autoTab];
@@ -427,36 +427,32 @@ async function readSidebarViaScript(tabId) {
       func: (excludedJson) => {
         const EXCLUDED = new Set(JSON.parse(excludedJson));
         const NON_FOLLOWING_KEYWORDS = [
-          'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
-          'フォローしていない', 'あなたが気に入るかもしれないチャンネル',
-          'channels you might like', 'おすすめ', 'recommended', 'suggested',
+          'あなたが気に入るかもしれないチャンネル', 'channels you might like',
+          'おすすめ', 'recommended', 'suggested',
+          'フォロー外', 'フォロー待ち', 'pending', 'not following',
         ];
 
-        // 非フォローセクションのDOMコンテナを特定（ノード単位で除外）
-        const nonFollowingContainers = [];
-        document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li').forEach((el) => {
-          if (el.children.length > 0) return;
+        // 非フォロー見出し要素を探し、それより後のリンクを DOM 位置で除外
+        let nonFollowingHeading = null;
+        for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li')) {
+          if (el.children.length > 0) continue;
           const text = el.textContent.trim().toLowerCase();
-          if (!NON_FOLLOWING_KEYWORDS.some((kw) => text.includes(kw))) return;
-          let node = el.parentElement;
-          for (let depth = 0; depth < 12; depth++) {
-            if (!node || node === document.body) break;
-            if (node.querySelectorAll('a[href]').length >= 2) {
-              nonFollowingContainers.push(node);
-              break;
-            }
-            node = node.parentElement;
+          if (NON_FOLLOWING_KEYWORDS.some((kw) => text.includes(kw))) {
+            nonFollowingHeading = el;
+            break;
           }
-        });
+        }
+        const isAfterNonFollowing = (el) =>
+          !!nonFollowingHeading &&
+          !!(nonFollowingHeading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-        const isInNonFollowing = (el) => nonFollowingContainers.some((c) => c.contains(el));
         const channels = new Set();
 
         // 戦略0: section[data-showingmore] a[data-focus-target="true"]
         const followSection = document.querySelector('section[data-showingmore]');
         if (followSection) {
           followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
-            if (isInNonFollowing(a)) return;
+            if (isAfterNonFollowing(a)) return;
             const href = a.getAttribute('href') || '';
             const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
             if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
@@ -466,7 +462,7 @@ async function readSidebarViaScript(tabId) {
 
         // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
         document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
-          if (isInNonFollowing(a)) return;
+          if (isAfterNonFollowing(a)) return;
           const href = a.getAttribute('href') || '';
           const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
           if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());

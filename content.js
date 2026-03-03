@@ -32,49 +32,38 @@ async function getFollowedWithRetry() {
   return { usernames: [] };
 }
 
-// 非フォローセクションのDOMコンテナ一覧を返す（スラグではなくノードで除外）
-function getNonFollowingContainers() {
-  const containers = [];
-  const NON_FOLLOWING_KEYWORDS = [
-    'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
-    'フォローしていない', 'あなたが気に入るかもしれないチャンネル',
-    'channels you might like', 'おすすめ', 'recommended', 'suggested',
+// 「おすすめ」等の非フォロー見出し要素を返す（DOMツリー上の最初の1つ）
+function findNonFollowingHeading() {
+  const KEYWORDS = [
+    'あなたが気に入るかもしれないチャンネル', 'channels you might like',
+    'おすすめ', 'recommended', 'suggested',
+    'フォロー外', 'フォロー待ち', 'pending', 'not following',
   ];
-
-  document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li').forEach((el) => {
-    if (el.children.length > 0) return;
+  for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li')) {
+    if (el.children.length > 0) continue;
     const text = el.textContent.trim().toLowerCase();
-    if (!NON_FOLLOWING_KEYWORDS.some((kw) => text.includes(kw))) return;
-
-    // 親コンテナを辿り、リンクが複数含まれるノードをセクションとして登録
-    let node = el.parentElement;
-    for (let depth = 0; depth < 12; depth++) {
-      if (!node || node === document.body) break;
-      if (node.querySelectorAll('a[href]').length >= 2) {
-        containers.push(node);
-        break;
-      }
-      node = node.parentElement;
-    }
-  });
-
-  return containers;
+    if (KEYWORDS.some((kw) => text.includes(kw))) return el;
+  }
+  return null;
 }
 
 function getFollowedFromDOM() {
   const channels = new Set();
 
-  // /following ページ専用の取得戦略（ノイズのある他の戦略はスキップ）
-  if (window.location.pathname === '/following') {
-    // 非フォローセクションのコンテナを特定（ノード単位で除外するため）
-    const nonFollowingContainers = getNonFollowingContainers();
-    const isInNonFollowing = (el) => nonFollowingContainers.some((c) => c.contains(el));
+  // /following/channels ページ専用の取得戦略（ノイズのある他の戦略はスキップ）
+  if (window.location.pathname === '/following/channels/channels') {
+    // 非フォロー見出し要素を取得し、それより後のリンクを DOM 位置で除外する
+    const nonFollowingHeading = findNonFollowingHeading();
+    // DOCUMENT_POSITION_FOLLOWING(4): el が見出しより後にある → 除外
+    const isAfterNonFollowing = (el) =>
+      !!nonFollowingHeading &&
+      !!(nonFollowingHeading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
 
     // 戦略0: section[data-showingmore] a[data-focus-target="true"]
     const followSection = document.querySelector('section[data-showingmore]');
     if (followSection) {
       followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
-        if (isInNonFollowing(a)) return;
+        if (isAfterNonFollowing(a)) return;
         const href = a.getAttribute('href') || '';
         const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
         if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
@@ -84,16 +73,16 @@ function getFollowedFromDOM() {
 
     // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
     document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
-      if (isInNonFollowing(a)) return;
+      if (isAfterNonFollowing(a)) return;
       const href = a.getAttribute('href') || '';
       const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
       if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
     });
-    // /following ページなので、空でもリトライに任せて返す
+    // /following/channels ページなので、空でもリトライに任せて返す
     return [...channels];
   }
 
-  // /following 以外のページ（サイドバー経由）の取得戦略
+  // /following/channels 以外のページ（サイドバー経由）の取得戦略
   // 戦略1: 「フォロー中」「Following」テキストを持つ要素の近隣リンクを探す
   const byText = extractByFollowingSection();
   byText.forEach((s) => channels.add(s));
@@ -170,13 +159,13 @@ function sleep(ms) {
 }
 
 // ============================================================
-// リアルタイム自動同期（/following ページ検出時に自動送信）
+// リアルタイム自動同期（/following/channels ページ検出時に自動送信）
 // ============================================================
 
 let lastAutoSyncTime = 0;
 
 function tryAutoSync() {
-  if (window.location.pathname !== '/following') return;
+  if (window.location.pathname !== '/following/channels/channels') return;
   const now = Date.now();
   if (now - lastAutoSyncTime < 10000) return; // 10秒クールダウン
   lastAutoSyncTime = now;
