@@ -32,18 +32,55 @@ async function getFollowedWithRetry() {
   return { usernames: [] };
 }
 
+// 「フォロー外」「フォロー待ち」「Pending」などの非フォローセクションに含まれるスラグを返す
+function getNonFollowingSlugs() {
+  const excluded = new Set();
+  const NON_FOLLOWING_KEYWORDS = [
+    'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
+    'フォローしていない', 'followers', 'フォロワー',
+  ];
+
+  document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li').forEach((el) => {
+    if (el.children.length > 0) return;
+    const text = el.textContent.trim().toLowerCase();
+    if (!NON_FOLLOWING_KEYWORDS.some((kw) => text.includes(kw))) return;
+
+    // 親コンテナを辿ってリンクを収集
+    let node = el.parentElement;
+    for (let depth = 0; depth < 12; depth++) {
+      if (!node || node === document.body) break;
+      const links = node.querySelectorAll('a[href]');
+      if (links.length >= 2) {
+        links.forEach((a) => {
+          const href = a.getAttribute('href') || '';
+          const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+          if (m) excluded.add(m[1].toLowerCase());
+        });
+        break;
+      }
+      node = node.parentElement;
+    }
+  });
+
+  return excluded;
+}
+
 function getFollowedFromDOM() {
   const channels = new Set();
 
   // /following ページ専用の取得戦略（ノイズのある他の戦略はスキップ）
   if (window.location.pathname === '/following') {
+    const nonFollowing = getNonFollowingSlugs();
+
+    const isAllowed = (slug) => !EXCLUDED.has(slug) && !nonFollowing.has(slug);
+
     // 戦略0: section[data-showingmore] a[data-focus-target="true"]
     const followSection = document.querySelector('section[data-showingmore]');
     if (followSection) {
       followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
         const href = a.getAttribute('href') || '';
         const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-        if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+        if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
       });
       if (channels.size > 0) return [...channels];
     }
@@ -52,7 +89,7 @@ function getFollowedFromDOM() {
     document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
       const href = a.getAttribute('href') || '';
       const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-      if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+      if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
     });
     // /following ページなので、空でもリトライに任せて返す
     return [...channels];

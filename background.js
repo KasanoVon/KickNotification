@@ -426,27 +426,53 @@ async function readSidebarViaScript(tabId) {
       target: { tabId },
       func: (excludedJson) => {
         const EXCLUDED = new Set(JSON.parse(excludedJson));
+        const NON_FOLLOWING_KEYWORDS = [
+          'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
+          'フォローしていない', 'followers', 'フォロワー',
+        ];
+
+        // 「フォロー外」「フォロー待ち」などのセクションに含まれるスラグを除外セットに収集
+        const nonFollowing = new Set();
+        document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li').forEach((el) => {
+          if (el.children.length > 0) return;
+          const text = el.textContent.trim().toLowerCase();
+          if (!NON_FOLLOWING_KEYWORDS.some((kw) => text.includes(kw))) return;
+          let node = el.parentElement;
+          for (let depth = 0; depth < 12; depth++) {
+            if (!node || node === document.body) break;
+            const links = node.querySelectorAll('a[href]');
+            if (links.length >= 2) {
+              links.forEach((a) => {
+                const href = a.getAttribute('href') || '';
+                const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+                if (m) nonFollowing.add(m[1].toLowerCase());
+              });
+              break;
+            }
+            node = node.parentElement;
+          }
+        });
+
+        const isAllowed = (slug) => !EXCLUDED.has(slug) && !nonFollowing.has(slug);
         const channels = new Set();
 
-        // /following ページ専用の取得（常にこのページを使用するため）
         // 戦略0: section[data-showingmore] a[data-focus-target="true"]
         const followSection = document.querySelector('section[data-showingmore]');
         if (followSection) {
           followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
             const href = a.getAttribute('href') || '';
             const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-            if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+            if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
           });
           if (channels.size > 0) return [...channels];
         }
 
-        // 戦略0.5: class="relative flex h-full flex-col gap-4"（/following ページのフォロー中グリッド）
+        // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
         document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
           const href = a.getAttribute('href') || '';
           const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-          if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+          if (m && isAllowed(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
         });
-        // /following ページのみ使用するため、結果を返す（空でもリトライに任せる）
         return [...channels];
       },
       args: [EXCLUDED_JSON],
