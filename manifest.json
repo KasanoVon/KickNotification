@@ -12,7 +12,9 @@
     "identity"
   ],
   "host_permissions": [
-    "https://kick.com/*"
+    "https://kick.com/*",
+    "https://api.kick.com/*",
+    "https://id.kick.com/*"
   ],
   "content_scripts": [
     {
