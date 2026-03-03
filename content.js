@@ -32,38 +32,15 @@ async function getFollowedWithRetry() {
   return { usernames: [] };
 }
 
-// 「おすすめ」等の非フォロー見出し要素を返す（DOMツリー上の最初の1つ）
-function findNonFollowingHeading() {
-  const KEYWORDS = [
-    'あなたが気に入るかもしれないチャンネル', 'channels you might like',
-    'おすすめ', 'recommended', 'suggested',
-    'フォロー外', 'フォロー待ち', 'pending', 'not following',
-  ];
-  for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, span, p, div, li')) {
-    if (el.children.length > 0) continue;
-    const text = el.textContent.trim().toLowerCase();
-    if (KEYWORDS.some((kw) => text.includes(kw))) return el;
-  }
-  return null;
-}
-
 function getFollowedFromDOM() {
   const channels = new Set();
 
-  // /following/channels ページ専用の取得戦略（ノイズのある他の戦略はスキップ）
-  if (window.location.pathname === '/following/channels/channels') {
-    // 非フォロー見出し要素を取得し、それより後のリンクを DOM 位置で除外する
-    const nonFollowingHeading = findNonFollowingHeading();
-    // DOCUMENT_POSITION_FOLLOWING(4): el が見出しより後にある → 除外
-    const isAfterNonFollowing = (el) =>
-      !!nonFollowingHeading &&
-      !!(nonFollowingHeading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
-
-    // 戦略0: section[data-showingmore] a[data-focus-target="true"]
-    const followSection = document.querySelector('section[data-showingmore]');
-    if (followSection) {
-      followSection.querySelectorAll('a[data-focus-target="true"][href]').forEach((a) => {
-        if (isAfterNonFollowing(a)) return;
+  // /following/channels ページ専用の取得戦略
+  if (window.location.pathname === '/following/channels') {
+    // 戦略0: section[data-testid="following"] — フォロー中セクションのみを確実に取得
+    const followingSection = document.querySelector('section[data-testid="following"]');
+    if (followingSection) {
+      followingSection.querySelectorAll('a[href]').forEach((a) => {
         const href = a.getAttribute('href') || '';
         const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
         if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
@@ -71,14 +48,21 @@ function getFollowedFromDOM() {
       if (channels.size > 0) return [...channels];
     }
 
-    // 戦略0.5: class="relative flex h-full flex-col gap-4"（フォロー中グリッド）
-    document.querySelectorAll('.relative.flex.h-full.flex-col.gap-4 a[href]').forEach((a) => {
-      if (isAfterNonFollowing(a)) return;
-      const href = a.getAttribute('href') || '';
-      const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-      if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-    });
-    // /following/channels ページなので、空でもリトライに任せて返す
+    // 戦略1（フォールバック）: h2「フォローしているチャンネル」配下のグリッド
+    const heading = [...document.querySelectorAll('h2')].find(
+      (el) => el.textContent.trim() === 'フォローしているチャンネル'
+    );
+    if (heading) {
+      const grid = heading.closest('section')?.querySelector('.grid');
+      if (grid) {
+        grid.querySelectorAll('a[href]').forEach((a) => {
+          const href = a.getAttribute('href') || '';
+          const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
+          if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
+        });
+      }
+    }
+
     return [...channels];
   }
 
