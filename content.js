@@ -133,3 +133,51 @@ function addChannelFromAnchor(anchor, channels) {
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// ============================================================
+// リアルタイム自動同期（/following ページ検出時に自動送信）
+// ============================================================
+
+let lastAutoSyncTime = 0;
+
+function tryAutoSync() {
+  if (window.location.pathname !== '/following') return;
+  const now = Date.now();
+  if (now - lastAutoSyncTime < 10000) return; // 10秒クールダウン
+  lastAutoSyncTime = now;
+  runAutoSync();
+}
+
+async function runAutoSync() {
+  // 即時チェック（既にDOMが揃っている場合）
+  const immediate = getFollowedFromDOM();
+  if (immediate.length > 0) {
+    chrome.runtime.sendMessage({ type: 'AUTO_SYNC_FOLLOWS', usernames: immediate });
+    return;
+  }
+
+  // DOM変化を監視してチャンネルリスト出現を待つ
+  let done = false;
+  const observer = new MutationObserver(() => {
+    if (done) return;
+    const channels = getFollowedFromDOM();
+    if (channels.length > 0) {
+      done = true;
+      observer.disconnect();
+      chrome.runtime.sendMessage({ type: 'AUTO_SYNC_FOLLOWS', usernames: channels });
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  // 最大30秒でタイムアウト
+  setTimeout(() => { if (!done) observer.disconnect(); }, 30000);
+}
+
+// 初期ロード
+tryAutoSync();
+
+// SPA ナビゲーション検出（Vue.js の pushState / replaceState に対応）
+const _origPush = history.pushState.bind(history);
+const _origReplace = history.replaceState.bind(history);
+history.pushState = function (...args) { _origPush(...args); setTimeout(tryAutoSync, 500); };
+history.replaceState = function (...args) { _origReplace(...args); setTimeout(tryAutoSync, 500); };
+window.addEventListener('popstate', () => setTimeout(tryAutoSync, 500));

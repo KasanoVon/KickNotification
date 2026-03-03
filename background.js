@@ -297,6 +297,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     syncFollowedChannels().then(sendResponse);
     return true;
   }
+  if (message.type === 'AUTO_SYNC_FOLLOWS') {
+    if (Array.isArray(message.usernames) && message.usernames.length > 0) {
+      mergeAndSave(message.usernames);
+    }
+    sendResponse({ success: true });
+    return true;
+  }
   if (message.type === 'KICK_LOGIN') {
     kickOAuthLogin(message.clientId, message.clientSecret).then(sendResponse).catch((err) =>
       sendResponse({ error: err.message })
