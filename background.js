@@ -429,6 +429,8 @@ async function readSidebarViaScript(tabId) {
         const NON_FOLLOWING_KEYWORDS = [
           'フォロー外', 'フォロー待ち', 'pending', 'not following', 'フォローされていない',
           'フォローしていない', 'followers', 'フォロワー',
+          'あなたが気に入るかもしれないチャンネル', 'channels you might like',
+          'おすすめ', 'recommended', 'suggested',
         ];
 
         // 「フォロー外」「フォロー待ち」などのセクションに含まれるスラグを除外セットに収集
