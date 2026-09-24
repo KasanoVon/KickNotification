@@ -9,9 +9,7 @@
     "alarms",
     "tabs",
     "scripting",
-    "identity",
-    "offscreen",
-    "declarativeNetRequestWithHostAccess"
+    "identity"
   ],
   "host_permissions": [
     "https://kick.com/*",
@@ -26,8 +24,7 @@
       "js": [
         "content.js"
       ],
-      "run_at": "document_idle",
-      "all_frames": true
+      "run_at": "document_idle"
     }
   ],
   "background": {

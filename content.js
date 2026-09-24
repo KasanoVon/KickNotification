@@ -4,6 +4,12 @@
 const FOLLOWING_PATH = '/following/channels';
 // チャンネルのスラグ（例: /toro72, /kohey-nishi）
 const SLUG_RE = /^\/([a-zA-Z0-9_-]{2,50})$/;
+// チャンネルではない kick.com のページ（未ログイン時の案内リンクなど）
+const SYSTEM_PATHS = new Set([
+  'browse', 'categories', 'following', 'home', 'search', 'login', 'signup',
+  'settings', 'dashboard', 'subscriptions', 'clips', 'videos', 'wallet', 'terms',
+  'privacy', 'help', 'about', 'contact', 'community-guidelines', 'dmca',
+]);
 
 // background.js からのメッセージを受信
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -33,7 +39,8 @@ function getFollowedFromDOM() {
   const channels = new Set();
   root.querySelectorAll('a[href]').forEach((a) => {
     const m = (a.getAttribute('href') || '').match(SLUG_RE);
-    if (m) channels.add(m[1].toLowerCase());
+    const slug = m?.[1].toLowerCase();
+    if (slug && !SYSTEM_PATHS.has(slug)) channels.add(slug);
   });
   return [...channels];
 }

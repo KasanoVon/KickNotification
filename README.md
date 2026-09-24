@@ -26,7 +26,7 @@ Kick.com でフォローしているチャンネルの配信開始をデスク�
 2. 拡張機能のポップアップを開き「同期」ボタンをクリック（15分ごとにも自動で同期されます）
 3. フォロー中チャンネルが登録される
 
-同期は画面に何も開かずに行います。うまくいかない環境では、最小化したウィンドウで一瞬だけページを開いて取得します。
+`https://kick.com/following/channels` のタブを開いていればそこから読み、なければ最小化したウィンドウで一瞬だけ開いて取得します（タスクバーに一瞬表示されます）。
 `https://kick.com/following/channels` を開いたときも自動で同期されます。
 
 ### Kick API でログインする（任意）
@@ -48,7 +48,6 @@ Kick Developer Portal で Client ID を取得すると、ブラウザを開か�
 ├── manifest.json       # 拡張機能の設定（Manifest V3）
 ├── background.js       # Service Worker：API ポーリング・通知・OAuth
 ├── content.js          # Content Script：kick.com DOM からフォロー一覧を取得
-├── offscreen.html      # 定期同期用の非表示ページ（kick.com を iframe で読み込む）
 ├── popup.html          # ポップアップ UI
 ├── popup.js            # ポップアップのロジック
 ├── popup.css           # ポップアップのスタイル
@@ -66,8 +65,6 @@ Kick Developer Portal で Client ID を取得すると、ブラウザを開か�
 | `tabs` | 自動入場時のタブ操作 |
 | `scripting` | フォロー一覧の DOM 取得 |
 | `identity` | OAuth 認証フロー |
-| `offscreen` | タブを開かずにフォロー一覧を読み込む |
-| `declarativeNetRequestWithHostAccess` | 上記の非表示ページで kick.com を iframe 表示できるようにする |
 | `https://kick.com/*` | Kick API へのアクセス |
 
 ## 動作環境

@@ -8,8 +8,6 @@ const KICK_OAUTH_BASE = 'https://id.kick.com';
 const KICK_PUBLIC_API = 'https://api.kick.com/public/v1';
 const FOLLOWING_PATH = '/following/channels';
 const FOLLOWING_URL = `https://kick.com${FOLLOWING_PATH}`;
-const OFFSCREEN_TIMEOUT_MS = 30000;
-const IFRAME_RULE_ID = 1;
 
 // ============================================================
 // OAuth 2.1 + PKCE ヘルパー
@@ -249,7 +247,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 // メッセージリスナー
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'CHECK_NOW') {
     checkAllStreams().then(() => sendResponse({ success: true }));
     return true;
@@ -260,12 +258,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.type === 'AUTO_SYNC_FOLLOWS') {
     const usernames = Array.isArray(message.usernames) ? message.usernames : [];
-    if (!sender.tab && offscreenResolver) {
-      // 非表示ページ（offscreen）の iframe からの結果
-      offscreenResolver(usernames);
-    } else if (usernames.length > 0) {
-      applyFollowedList(usernames);
-    }
+    if (usernames.length > 0) applyFollowedList(usernames);
     sendResponse({ success: true });
     return true;
   }
@@ -288,10 +281,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // フォロー一覧の同期
 // ============================================================
 
-// 同期の取得元は画面に出ない順に試す:
-//   1. すでに開いている /following/channels タブ
-//   2. 非表示ページ（offscreen document）の iframe
-//   3. 最小化した別ウィンドウ（1, 2 が使えないときの最終手段）
+// 同期の取得元:
+//   1. すでに開いている /following/channels タブ（何も開かない）
+//   2. なければ最小化した別ウィンドウで開いて読み、すぐ閉じる
+// ※ 非表示ページ（offscreen）の iframe は kick.com のログイン状態が引き継がれないため使えない
 let syncInFlight = null;
 
 function syncFollowedChannels() {
@@ -325,12 +318,6 @@ async function fetchFollowedList() {
     const fromTab = await readFromTab(openTab.id);
     if (fromTab.length > 0) return fromTab;
   }
-
-  const fromOffscreen = await readViaOffscreen().catch((err) => {
-    console.warn('Offscreen sync failed:', err);
-    return [];
-  });
-  if (fromOffscreen.length > 0) return fromOffscreen;
 
   return readViaMinimizedWindow();
 }
@@ -394,59 +381,7 @@ function askContentScript(tabId) {
   });
 }
 
-// ---- 非表示ページ（offscreen document）経由 ----
-
-let offscreenResolver = null;
-
-async function readViaOffscreen() {
-  await allowKickInIframe();
-  await chrome.offscreen.closeDocument().catch(() => {});
-
-  const result = new Promise((resolve) => {
-    offscreenResolver = resolve;
-    setTimeout(() => resolve([]), OFFSCREEN_TIMEOUT_MS);
-  });
-
-  try {
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['DOM_SCRAPING'],
-      justification: 'フォロー中チャンネル一覧をタブを開かずに取得するため',
-    });
-    return await result;
-  } finally {
-    offscreenResolver = null;
-    await chrome.offscreen.closeDocument().catch(() => {});
-  }
-}
-
-// kick.com は iframe での表示を拒否するヘッダーを返すため、
-// タブ外（offscreen）から読み込む iframe に限ってそのヘッダーを外す
-function allowKickInIframe() {
-  return chrome.declarativeNetRequest.updateSessionRules({
-    removeRuleIds: [IFRAME_RULE_ID],
-    addRules: [
-      {
-        id: IFRAME_RULE_ID,
-        priority: 1,
-        action: {
-          type: 'modifyHeaders',
-          responseHeaders: [
-            { header: 'x-frame-options', operation: 'remove' },
-            { header: 'content-security-policy', operation: 'remove' },
-          ],
-        },
-        condition: {
-          requestDomains: ['kick.com'],
-          resourceTypes: ['sub_frame'],
-          tabIds: [chrome.tabs.TAB_ID_NONE],
-        },
-      },
-    ],
-  });
-}
-
-// ---- 最小化ウィンドウ経由（最終手段） ----
+// ---- 最小化ウィンドウ経由 ----
 
 async function readViaMinimizedWindow() {
   const win = await chrome.windows.create({
