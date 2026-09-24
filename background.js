@@ -6,6 +6,10 @@ const SYNC_INTERVAL_MINUTES = 15;
 const KICK_API_BASE = 'https://kick.com/api/v2/channels/';
 const KICK_OAUTH_BASE = 'https://id.kick.com';
 const KICK_PUBLIC_API = 'https://api.kick.com/public/v1';
+const FOLLOWING_PATH = '/following/channels';
+const FOLLOWING_URL = `https://kick.com${FOLLOWING_PATH}`;
+const OFFSCREEN_TIMEOUT_MS = 30000;
+const IFRAME_RULE_ID = 1;
 
 // ============================================================
 // OAuth 2.1 + PKCE ヘルパー
@@ -96,55 +100,6 @@ async function kickOAuthLogin(clientId, clientSecret) {
 
   return { success: true, user };
 }
-
-// トークンの有効期限チェック & リフレッシュ
-async function getValidToken() {
-  const data = await chrome.storage.local.get([
-    'kickAccessToken', 'kickRefreshToken', 'kickTokenExpiry',
-    'kickClientId', 'kickClientSecret',
-  ]);
-
-  if (!data.kickAccessToken) return null;
-
-  // 有効期限まで5分以上あればそのまま使用
-  if (data.kickTokenExpiry && Date.now() < data.kickTokenExpiry - 5 * 60 * 1000) {
-    return data.kickAccessToken;
-  }
-
-  // リフレッシュトークンで更新
-  if (!data.kickRefreshToken || !data.kickClientId) return null;
-
-  try {
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: data.kickClientId,
-      refresh_token: data.kickRefreshToken,
-    });
-    if (data.kickClientSecret) body.set('client_secret', data.kickClientSecret);
-
-    const res = await fetch(`${KICK_OAUTH_BASE}/oauth/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-
-    if (!res.ok) {
-      await chrome.storage.local.remove(['kickAccessToken', 'kickRefreshToken', 'kickTokenExpiry', 'kickUser']);
-      return null;
-    }
-
-    const tokens = await res.json();
-    await chrome.storage.local.set({
-      kickAccessToken: tokens.access_token,
-      kickRefreshToken: tokens.refresh_token || data.kickRefreshToken,
-      kickTokenExpiry: Date.now() + (tokens.expires_in || 3600) * 1000,
-    });
-    return tokens.access_token;
-  } catch {
-    return null;
-  }
-}
-
 // Bearer トークン付きで API リクエスト
 async function fetchWithToken(token, url) {
   const res = await fetch(url, {
@@ -154,31 +109,10 @@ async function fetchWithToken(token, url) {
   return res.json();
 }
 
-// フォロー中チャンネルを公式 API から取得
-async function getFollowedViaOAuth() {
-  const token = await getValidToken();
-  if (!token) return null;
+// ============================================================
+// 定期実行
+// ============================================================
 
-  // 試みるエンドポイント（公式APIにまだ公開されていない可能性あり）
-  const candidates = [
-    `${KICK_PUBLIC_API}/channels/followed`,
-    `${KICK_PUBLIC_API}/users/me/following`,
-    `${KICK_PUBLIC_API}/users/following`,
-  ];
-
-  for (const url of candidates) {
-    const data = await fetchWithToken(token, url);
-    if (!data) continue;
-    const list = data.data || data.channels || data.followed || (Array.isArray(data) ? data : null);
-    if (Array.isArray(list) && list.length > 0) {
-      return list.map((ch) => (ch.slug || ch.broadcaster_username || ch.username || '').toLowerCase()).filter(Boolean);
-    }
-  }
-
-  return null; // 公式APIでは未公開の可能性
-}
-
-// 拡張機能インストール時・起動時の初期化
 chrome.runtime.onInstalled.addListener(() => {
   setupAlarm();
 });
@@ -199,43 +133,57 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'syncFollows') syncFollowedChannels();
 });
 
+// ============================================================
+// 配信状態のチェックと通知
+// ============================================================
+
 // 登録された全ストリーマーのライブ状態をチェック
 async function checkAllStreams() {
-  const data = await chrome.storage.local.get(['streamers', 'liveStatus']);
-  const streamers = data.streamers || [];
-  const previousStatus = data.liveStatus || {};
+  const { streamers = [], liveStatus: previousStatus = {} } =
+    await chrome.storage.local.get(['streamers', 'liveStatus']);
 
   if (streamers.length === 0) return;
 
   const newStatus = {};
+  const wentLive = [];
 
   await Promise.all(
     streamers.map(async (username) => {
+      const before = previousStatus[username];
       try {
         const channelData = await fetchChannelData(username);
-        if (!channelData) return;
+        if (!channelData) {
+          if (before) newStatus[username] = before;
+          return;
+        }
 
-        const isLive = channelData.livestream !== null;
+        const live = channelData.livestream;
         newStatus[username] = {
-          isLive,
-          title: channelData.livestream?.session_title || '',
-          category: channelData.livestream?.categories?.[0]?.name || '',
-          viewers: channelData.livestream?.viewer_count || 0,
-          thumbnail: channelData.livestream?.thumbnail?.url || channelData.user?.profile_pic || '',
+          isLive: !!live,
+          title: live?.session_title || '',
+          category: live?.categories?.[0]?.name || '',
+          viewers: live?.viewer_count || 0,
+          thumbnail: live?.thumbnail?.url || channelData.user?.profile_pic || '',
           avatar: channelData.user?.profile_pic || '',
         };
 
-        const wasLive = previousStatus[username]?.isLive || false;
-        if (!wasLive && isLive) {
-          sendNotification(username, newStatus[username]);
+        // 前回の状態がない（追加直後）ときは基準として記録するだけで通知しない
+        if (before && !before.isLive && newStatus[username].isLive) {
+          wentLive.push(username);
         }
       } catch (err) {
         console.error(`Failed to check ${username}:`, err);
+        // 一時的な失敗で前回の状態を失うと、復帰時に同じ配信を再通知してしまう
+        if (before) newStatus[username] = before;
       }
     })
   );
 
   await chrome.storage.local.set({ liveStatus: newStatus });
+
+  for (const username of wentLive) {
+    sendNotification(username, newStatus[username]);
+  }
 }
 
 async function fetchChannelData(username) {
@@ -290,8 +238,18 @@ chrome.notifications.onClicked.addListener((notifId) => {
   }
 });
 
+// SPA 内の遷移で /following/channels に来たときも自動同期する
+// （content.js はページとは別の環境で動くため、ページ側の pushState を検知できない）
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) return;
+  const url = new URL(changeInfo.url);
+  if (url.hostname === 'kick.com' && url.pathname === FOLLOWING_PATH) {
+    chrome.tabs.sendMessage(tabId, { type: 'RUN_AUTO_SYNC' }).catch(() => {});
+  }
+});
+
 // メッセージリスナー
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CHECK_NOW') {
     checkAllStreams().then(() => sendResponse({ success: true }));
     return true;
@@ -301,8 +259,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message.type === 'AUTO_SYNC_FOLLOWS') {
-    if (Array.isArray(message.usernames) && message.usernames.length > 0) {
-      mergeAndSave(message.usernames);
+    const usernames = Array.isArray(message.usernames) ? message.usernames : [];
+    if (!sender.tab && offscreenResolver) {
+      // 非表示ページ（offscreen）の iframe からの結果
+      offscreenResolver(usernames);
+    } else if (usernames.length > 0) {
+      applyFollowedList(usernames);
     }
     sendResponse({ success: true });
     return true;
@@ -322,57 +284,182 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-// フォロー中チャンネルを同期する
-// アプローチ0: 公式 OAuth API（kick.com タブ不要）
-// アプローチ1: content.js (DOM scraping) に依頼
-// アプローチ2: executeScript で直接 DOM を読む（content.js 未ロード時のフォールバック）
-// ※ kick.com タブが開いていない場合は自動でバックグラウンドタブを開いて取得後に閉じる
-async function syncFollowedChannels() {
+// ============================================================
+// フォロー一覧の同期
+// ============================================================
+
+// 同期の取得元は画面に出ない順に試す:
+//   1. すでに開いている /following/channels タブ
+//   2. 非表示ページ（offscreen document）の iframe
+//   3. 最小化した別ウィンドウ（1, 2 が使えないときの最終手段）
+let syncInFlight = null;
+
+function syncFollowedChannels() {
+  if (!syncInFlight) {
+    syncInFlight = runSync().finally(() => {
+      syncInFlight = null;
+    });
+  }
+  return syncInFlight;
+}
+
+async function runSync() {
   try {
-    // アプローチ0: OAuth トークンがあれば公式 API を試す
-    const oauthResult = await getFollowedViaOAuth();
-    if (oauthResult !== null && oauthResult.length > 0) {
-      return await mergeAndSave(oauthResult);
-    }
-
-    // 常に /following/channels ページのタブを使用する（他のページは不正確な結果を返すため）
-    let tabs = await chrome.tabs.query({ url: 'https://kick.com/following/channels' });
-    let autoTab = null;
-
-    if (tabs.length === 0) {
-      // /following/channels タブを自動でバックグラウンド起動
-      autoTab = await chrome.tabs.create({ url: 'https://kick.com/following/channels', active: false });
-      await waitForTabLoad(autoTab.id);
-      await sleep(2500); // Vue レンダリング待機
-      tabs = [autoTab];
-    }
-
-    const tabId = tabs[0].id;
-
-    try {
-      // アプローチ1: content.js に DOM 読み取りを依頼
-      const contentResult = await askContentScript(tabId);
-      if (contentResult.length > 0) {
-        return await mergeAndSave(contentResult);
-      }
-
-      // アプローチ2: executeScript で DOM を直接読む（リトライあり）
-      const scriptResult = await readSidebarViaScript(tabId);
-      if (scriptResult.length > 0) {
-        return await mergeAndSave(scriptResult);
-      }
-
+    const usernames = await fetchFollowedList();
+    if (usernames.length === 0) {
       return {
         error:
           'フォロー中チャンネルを読み取れませんでした。\nkick.com にログインした状態でお試しください。',
       };
-    } finally {
-      // 自動で開いたタブは閉じる
-      if (autoTab) chrome.tabs.remove(autoTab.id).catch(() => {});
     }
+    return await applyFollowedList(usernames);
   } catch (err) {
     console.error('syncFollowedChannels error:', err);
     return { error: `エラー: ${err.message}` };
+  }
+}
+
+async function fetchFollowedList() {
+  const [openTab] = await chrome.tabs.query({ url: `${FOLLOWING_URL}*` });
+  if (openTab) {
+    const fromTab = await readFromTab(openTab.id);
+    if (fromTab.length > 0) return fromTab;
+  }
+
+  const fromOffscreen = await readViaOffscreen().catch((err) => {
+    console.warn('Offscreen sync failed:', err);
+    return [];
+  });
+  if (fromOffscreen.length > 0) return fromOffscreen;
+
+  return readViaMinimizedWindow();
+}
+
+// フォロー一覧をストレージに反映する（追加だけでなく、フォロー解除したチャンネルも削除する）
+async function applyFollowedList(followed) {
+  const {
+    streamers = [],
+    liveStatus = {},
+    autoJoinStreamers = [],
+    hiddenStreamers = [],
+  } = await chrome.storage.local.get([
+    'streamers', 'liveStatus', 'autoJoinStreamers', 'hiddenStreamers',
+  ]);
+
+  const followedSet = new Set(followed);
+  const hidden = new Set(hiddenStreamers);
+  const visible = [...followedSet].filter((u) => !hidden.has(u));
+
+  // 描画途中などで一覧が大きく欠けていた場合は削除を見送り、追加のみ行う
+  const incomplete = streamers.length >= 5 && visible.length < streamers.length / 2;
+  const next = incomplete ? [...new Set([...streamers, ...visible])] : visible;
+  const keep = new Set(next);
+
+  const update = {
+    streamers: next,
+    liveStatus: Object.fromEntries(Object.entries(liveStatus).filter(([u]) => keep.has(u))),
+    autoJoinStreamers: autoJoinStreamers.filter((u) => keep.has(u)),
+  };
+  if (!incomplete) {
+    // フォロー解除されたチャンネルは非表示リストからも外す（再フォロー時に表示されるように）
+    update.hiddenStreamers = hiddenStreamers.filter((u) => followedSet.has(u));
+  }
+  await chrome.storage.local.set(update);
+
+  checkAllStreams();
+  return {
+    success: true,
+    added: next.filter((u) => !streamers.includes(u)).length,
+    removed: streamers.filter((u) => !keep.has(u)).length,
+  };
+}
+
+// タブの content.js にフォロー一覧を問い合わせる。未注入なら注入してから再度問い合わせる
+async function readFromTab(tabId) {
+  let usernames = await askContentScript(tabId);
+  if (usernames === null) {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    usernames = await askContentScript(tabId);
+  }
+  return usernames || [];
+}
+
+// content.js が注入されていないときは null を返す
+function askContentScript(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, { type: 'GET_FOLLOWED' }, (response) => {
+      if (chrome.runtime.lastError) resolve(null);
+      else resolve(response?.usernames || []);
+    });
+  });
+}
+
+// ---- 非表示ページ（offscreen document）経由 ----
+
+let offscreenResolver = null;
+
+async function readViaOffscreen() {
+  await allowKickInIframe();
+  await chrome.offscreen.closeDocument().catch(() => {});
+
+  const result = new Promise((resolve) => {
+    offscreenResolver = resolve;
+    setTimeout(() => resolve([]), OFFSCREEN_TIMEOUT_MS);
+  });
+
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['DOM_SCRAPING'],
+      justification: 'フォロー中チャンネル一覧をタブを開かずに取得するため',
+    });
+    return await result;
+  } finally {
+    offscreenResolver = null;
+    await chrome.offscreen.closeDocument().catch(() => {});
+  }
+}
+
+// kick.com は iframe での表示を拒否するヘッダーを返すため、
+// タブ外（offscreen）から読み込む iframe に限ってそのヘッダーを外す
+function allowKickInIframe() {
+  return chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [IFRAME_RULE_ID],
+    addRules: [
+      {
+        id: IFRAME_RULE_ID,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          responseHeaders: [
+            { header: 'x-frame-options', operation: 'remove' },
+            { header: 'content-security-policy', operation: 'remove' },
+          ],
+        },
+        condition: {
+          requestDomains: ['kick.com'],
+          resourceTypes: ['sub_frame'],
+          tabIds: [chrome.tabs.TAB_ID_NONE],
+        },
+      },
+    ],
+  });
+}
+
+// ---- 最小化ウィンドウ経由（最終手段） ----
+
+async function readViaMinimizedWindow() {
+  const win = await chrome.windows.create({
+    url: FOLLOWING_URL,
+    state: 'minimized',
+    focused: false,
+  });
+  const tabId = win.tabs[0].id;
+  try {
+    await waitForTabLoad(tabId);
+    return await readFromTab(tabId);
+  } finally {
+    chrome.windows.remove(win.id).catch(() => {});
   }
 }
 
@@ -391,89 +478,4 @@ function waitForTabLoad(tabId) {
       resolve();
     }, 15000);
   });
-}
-
-// content.js へメッセージを送りフォロー中チャンネルを取得
-function askContentScript(tabId) {
-  return new Promise((resolve) => {
-    chrome.tabs.sendMessage(tabId, { type: 'GET_FOLLOWED' }, (response) => {
-      if (chrome.runtime.lastError) {
-        // content.js 未注入は正常なフォールバック（executeScript で再試行）
-        resolve([]);
-      } else {
-        resolve(response?.usernames || []);
-      }
-    });
-  });
-}
-
-// executeScript でサイドバー DOM を読む（content.js が動かない場合のフォールバック）
-async function readSidebarViaScript(tabId) {
-  const EXCLUDED_JSON = JSON.stringify([
-    'categories', 'browse', 'clips', 'subscriptions', 'settings', 'home',
-    'following', 'live', 'schedule', 'about', 'dashboard', 'studio',
-    'help', 'privacy', 'terms', 'contact', 'login', 'register', 'search',
-    'streams', 'videos', 'chat', 'notifications', 'wallet', 'leaderboard',
-    'api', 'auth', 'logout', 'signup', 'discover', 'feed', 'explore',
-    'password', 'account', 'profile', 'creator', 'partners', 'en', 'ja',
-  ]);
-
-  // 最大 5 回リトライ（Vue の遅延レンダリング対策）
-  for (let attempt = 0; attempt < 5; attempt++) {
-    if (attempt > 0) await sleep(800);
-
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (excludedJson) => {
-        const EXCLUDED = new Set(JSON.parse(excludedJson));
-        const channels = new Set();
-
-        // 戦略0: section[data-testid="following"] — フォロー中セクションのみを確実に取得
-        const followingSection = document.querySelector('section[data-testid="following"]');
-        if (followingSection) {
-          followingSection.querySelectorAll('a[href]').forEach((a) => {
-            const href = a.getAttribute('href') || '';
-            const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-            if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-          });
-          if (channels.size > 0) return [...channels];
-        }
-
-        // 戦略1（フォールバック）: h2「フォローしているチャンネル」配下のグリッド
-        const heading = [...document.querySelectorAll('h2')].find(
-          (el) => el.textContent.trim() === 'フォローしているチャンネル'
-        );
-        if (heading) {
-          const grid = heading.closest('section')?.querySelector('.grid');
-          if (grid) {
-            grid.querySelectorAll('a[href]').forEach((a) => {
-              const href = a.getAttribute('href') || '';
-              const m = href.match(/^\/([a-zA-Z0-9_]{2,50})$/);
-              if (m && !EXCLUDED.has(m[1].toLowerCase())) channels.add(m[1].toLowerCase());
-            });
-          }
-        }
-        return [...channels];
-      },
-      args: [EXCLUDED_JSON],
-    });
-
-    const found = results?.[0]?.result || [];
-    if (found.length > 0) return found;
-  }
-
-  return [];
-}
-
-async function mergeAndSave(followedUsernames) {
-  const { streamers = [] } = await chrome.storage.local.get('streamers');
-  const merged = [...new Set([...streamers, ...followedUsernames])];
-  await chrome.storage.local.set({ streamers: merged });
-  const added = merged.length - streamers.length;
-  checkAllStreams();
-  return { success: true, added };
-}
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
