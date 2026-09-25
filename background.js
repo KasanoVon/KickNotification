@@ -3,6 +3,7 @@
 
 const CHECK_INTERVAL_MINUTES = 1;
 const SYNC_INTERVAL_MINUTES = 15;
+const FETCH_CONCURRENCY = 4;
 const KICK_API_BASE = 'https://kick.com/api/v2/channels/';
 const KICK_OAUTH_BASE = 'https://id.kick.com';
 const KICK_PUBLIC_API = 'https://api.kick.com/public/v1';
@@ -145,37 +146,36 @@ async function checkAllStreams() {
   const newStatus = {};
   const wentLive = [];
 
-  await Promise.all(
-    streamers.map(async (username) => {
-      const before = previousStatus[username];
-      try {
-        const channelData = await fetchChannelData(username);
-        if (!channelData) {
-          if (before) newStatus[username] = before;
-          return;
-        }
-
-        const live = channelData.livestream;
-        newStatus[username] = {
-          isLive: !!live,
-          title: live?.session_title || '',
-          category: live?.categories?.[0]?.name || '',
-          viewers: live?.viewer_count || 0,
-          thumbnail: live?.thumbnail?.url || channelData.user?.profile_pic || '',
-          avatar: channelData.user?.profile_pic || '',
-        };
-
-        // 前回の状態がない（追加直後）ときは基準として記録するだけで通知しない
-        if (before && !before.isLive && newStatus[username].isLive) {
-          wentLive.push(username);
-        }
-      } catch (err) {
-        console.error(`Failed to check ${username}:`, err);
-        // 一時的な失敗で前回の状態を失うと、復帰時に同じ配信を再通知してしまう
+  await forEachLimited(streamers, FETCH_CONCURRENCY, async (username) => {
+    const before = previousStatus[username];
+    try {
+      const channelData = await fetchChannelData(username);
+      if (!channelData) {
         if (before) newStatus[username] = before;
+        return;
       }
-    })
-  );
+
+      const live = channelData.livestream;
+      newStatus[username] = {
+        isLive: !!live,
+        title: live?.session_title || '',
+        category: live?.categories?.[0]?.name || '',
+        viewers: live?.viewer_count || 0,
+        thumbnail: live?.thumbnail?.url || channelData.user?.profile_pic || '',
+        avatar: channelData.user?.profile_pic || '',
+      };
+
+      // 前回の状態がない（追加直後）ときは基準として記録するだけで通知しない
+      if (before && !before.isLive && newStatus[username].isLive) {
+        wentLive.push(username);
+      }
+    } catch (err) {
+      // 通信の一時的な失敗はよくあるため警告にとどめる（前回の状態を引き継ぐ）
+      console.warn(`Failed to check ${username}:`, err.message);
+      // 一時的な失敗で前回の状態を失うと、復帰時に同じ配信を再通知してしまう
+      if (before) newStatus[username] = before;
+    }
+  });
 
   await chrome.storage.local.set({ liveStatus: newStatus });
 
@@ -184,10 +184,28 @@ async function checkAllStreams() {
   }
 }
 
+// items を最大 limit 件ずつ並行して処理する（一度に全件問い合わせると接続を切られるため）
+async function forEachLimited(items, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 async function fetchChannelData(username) {
-  const response = await fetch(`${KICK_API_BASE}${username}`, {
-    headers: { Accept: 'application/json' },
-  });
+  let response;
+  try {
+    response = await fetchChannel(username);
+  } catch {
+    // 接続が切られた場合は少し待って 1 回だけやり直す
+    await sleep(1000);
+    response = await fetchChannel(username);
+  }
+  if (response.status === 429) {
+    await sleep(3000);
+    response = await fetchChannel(username);
+  }
 
   if (!response.ok) {
     if (response.status === 404) {
@@ -198,6 +216,14 @@ async function fetchChannelData(username) {
   }
 
   return response.json();
+}
+
+function fetchChannel(username) {
+  return fetch(`${KICK_API_BASE}${username}`, { headers: { Accept: 'application/json' } });
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function sendNotification(username, info) {
