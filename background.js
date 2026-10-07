@@ -349,35 +349,42 @@ async function fetchFollowedList() {
 }
 
 // フォロー一覧をストレージに反映する（追加だけでなく、フォロー解除したチャンネルも削除する）
+// 読み込み途中などで一時的に欠けた一覧を誤って反映しないよう、
+// 削除は 2 回続けて一覧に無かったチャンネルだけに行う
 async function applyFollowedList(followed) {
   const {
     streamers = [],
     liveStatus = {},
-    autoJoinStreamers = [],
     hiddenStreamers = [],
+    missingOnce = [],
   } = await chrome.storage.local.get([
-    'streamers', 'liveStatus', 'autoJoinStreamers', 'hiddenStreamers',
+    'streamers', 'liveStatus', 'hiddenStreamers', 'missingOnce',
   ]);
 
   const followedSet = new Set(followed);
   const hidden = new Set(hiddenStreamers);
-  const visible = [...followedSet].filter((u) => !hidden.has(u));
+  const known = [...new Set([...streamers, ...hiddenStreamers])];
+  const missing = known.filter((u) => !followedSet.has(u));
 
-  // 描画途中などで一覧が大きく欠けていた場合は削除を見送り、追加のみ行う
-  const incomplete = streamers.length >= 5 && visible.length < streamers.length / 2;
-  const next = incomplete ? [...new Set([...streamers, ...visible])] : visible;
+  // 描画途中などで一覧が大きく欠けていた場合は削除の判定自体を見送る
+  const incomplete = streamers.length >= 5 && followed.length < streamers.length / 2;
+  const wasMissing = new Set(incomplete ? [] : missingOnce);
+  const gone = new Set(missing.filter((u) => wasMissing.has(u)));
+
+  const next = [
+    ...streamers.filter((u) => !gone.has(u)),
+    ...followed.filter((u) => !hidden.has(u) && !streamers.includes(u)),
+  ];
   const keep = new Set(next);
 
-  const update = {
+  // 自動入場の設定はチャンネル名ごとに残しておく（一覧から一時的に消えても失われないように）
+  await chrome.storage.local.set({
     streamers: next,
     liveStatus: Object.fromEntries(Object.entries(liveStatus).filter(([u]) => keep.has(u))),
-    autoJoinStreamers: autoJoinStreamers.filter((u) => keep.has(u)),
-  };
-  if (!incomplete) {
-    // フォロー解除されたチャンネルは非表示リストからも外す（再フォロー時に表示されるように）
-    update.hiddenStreamers = hiddenStreamers.filter((u) => followedSet.has(u));
-  }
-  await chrome.storage.local.set(update);
+    // フォロー解除が確定したチャンネルは非表示リストからも外す（再フォロー時に表示されるように）
+    hiddenStreamers: hiddenStreamers.filter((u) => !gone.has(u)),
+    missingOnce: incomplete ? missingOnce : missing.filter((u) => !gone.has(u)),
+  });
 
   checkAllStreams();
   return {
